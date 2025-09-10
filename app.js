@@ -1,0 +1,49 @@
+const contactRoutes = require('./routes/contact');
+const userRoutes = require('./routes/user');
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const authRoutes = require('./routes/auth');
+const walletRoutes = require('./routes/wallet');
+const connectDB = require('./config/db');
+const bookingRoutes = require('./routes/booking'); 
+const adminRoutes = require('./routes/admin');
+const slotRoutes = require('./routes/slot');
+const bannerRoutes = require('./routes/banner');
+const winnerRoutes = require('./routes/winner');
+const notificationRoutes = require('./routes/notification');
+const { startCronJobs } = require('./services/cronJobs');
+
+const app = express();
+
+app.use(cors({
+  origin: ['http://localhost:8080', 'http://192.168.1.6:8080'],
+  credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+connectDB();
+startCronJobs();
+app.use('/api', authRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/bookings',bookingRoutes );
+app.use('/api/admin', adminRoutes);
+app.use('/api/admin', slotRoutes);
+app.use('/api/banner', bannerRoutes);
+app.use('/api/v1', slotRoutes); 
+app.use('/api/winners', winnerRoutes);
+app.use('/api/notification', notificationRoutes);
+app.use('/uploads', express.static('uploads'));
+
+app.use((err, req, res, next) => {
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+const PORT = process.env.PORT || 5000;
+const server = app.listen(PORT);
+const { initSocket } = require('./websocket');
+initSocket(server);
