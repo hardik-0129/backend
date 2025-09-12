@@ -10,11 +10,9 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/your_data
 
 async function migrateReferralData() {
   try {
-    console.log('Starting referral data migration...');
     
     // Get all users who have referredBy field
     const usersWithReferrals = await User.find({ referredBy: { $exists: true, $ne: null } });
-    console.log(`Found ${usersWithReferrals.length} users with referrals`);
     
     for (const user of usersWithReferrals) {
       // Find referrer
@@ -23,7 +21,6 @@ async function migrateReferralData() {
         // Update referrer's totalReferrals count
         referrer.totalReferrals += 1;
         await referrer.save();
-        console.log(`Updated referrer ${referrer.name} with +1 referral`);
       }
     }
     
@@ -32,7 +29,6 @@ async function migrateReferralData() {
       'metadata.bonusType': { $in: ['signup_referral', 'first_paid_match_referral'] }
     });
     
-    console.log(`Found ${referralTransactions.length} referral transactions`);
     
     for (const transaction of referralTransactions) {
       const user = await User.findById(transaction.userId);
@@ -40,11 +36,9 @@ async function migrateReferralData() {
         // Update totalReferralEarnings
         user.totalReferralEarnings = (user.totalReferralEarnings || 0) + transaction.amount;
         await user.save();
-        console.log(`Updated user ${user.name} with +${transaction.amount} referral earnings`);
       }
     }
-    
-    console.log('Referral data migration completed successfully!');
+      
   } catch (error) {
     console.error('Migration error:', error);
   } finally {

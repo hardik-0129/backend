@@ -54,15 +54,6 @@ router.post('/test-compression', authentication, upload.single('testImage'), asy
       return res.status(400).json({ msg: 'No image file uploaded' });
     }
 
-    console.log('=== COMPRESSION TEST ===');
-    console.log('Original file:', {
-      name: req.file.originalname,
-      size: req.file.size,
-      sizeKB: Math.round(req.file.size / 1024),
-      sizeMB: Math.round((req.file.size / (1024 * 1024)) * 100) / 100,
-      mimetype: req.file.mimetype
-    });
-
     // Test compression
     const sharp = require('sharp');
     const path = require('path');
@@ -82,13 +73,6 @@ router.post('/test-compression', authentication, upload.single('testImage'), asy
     const originalSizeKB = Math.round(req.file.size / 1024);
     const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
     const compressionRatio = Math.round(((originalSizeKB - compressedSizeKB) / originalSizeKB) * 100);
-
-    console.log('Compressed file:', {
-      size: stats.size,
-      sizeKB: compressedSizeKB,
-      sizeMB: compressedSizeMB,
-      compressionRatio: compressionRatio
-    });
 
     // Clean up test file
     fs.unlinkSync(outputPath);

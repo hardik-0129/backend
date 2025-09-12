@@ -79,13 +79,6 @@ const compressProfilePhoto = async (req, res, next) => {
     req.file.path = outputPath;
     req.file.size = out.length;
 
-    console.log('Profile photo compressed:', {
-      originalBytes: req.file.buffer ? req.file.buffer.length : 'unknown',
-      finalBytes: out.length,
-      finalKB: Math.round(out.length / 1024),
-      savedKB: req.file.buffer ? Math.max(0, Math.round((req.file.buffer.length - out.length) / 1024)) : 'n/a'
-    });
-
     return next();
   } catch (error) {
     console.error('Profile photo compression error:', error);
@@ -191,8 +184,6 @@ router.post('/register', upload.single('profilePhoto'), compressProfilePhoto, as
 // ✅ Login Route
 router.post('/login', async (req, res) => {
   const { email, password, deviceToken } = req.body;
-  console.log(req.body);
-  console.log('Login attempt:', email, deviceToken);
 
   if (!email || !password)
     return res.status(400).json({ 
@@ -215,10 +206,13 @@ router.post('/login', async (req, res) => {
         message: 'Invalid password' 
       });
 
-    if (deviceToken) {
-      user.deviceToken = deviceToken;
-      await user.save();
-    }
+      if (deviceToken) {
+        // only add if not already present
+        if (!user.deviceToken.includes(deviceToken)) {
+          user.deviceToken.push(deviceToken);
+          await user.save();
+        }
+      }
     const token = jwt.sign({ userId: user._id, name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET, {
     });
 

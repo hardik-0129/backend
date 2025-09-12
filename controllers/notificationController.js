@@ -18,7 +18,7 @@ if (!admin.apps.length) {
 // POST /api/notification/send
 exports.sendNotification = async (req, res) => {
   try {
-    const { deviceToken, title, body, data } = req.body;
+    const { deviceToken, title, body, data, icon, image, click_action } = req.body;
     if (!deviceToken || !title || !body) {
       return res.status(400).json({ status: false, msg: 'deviceToken, title, and body are required' });
     }
@@ -26,6 +26,19 @@ exports.sendNotification = async (req, res) => {
       token: deviceToken,
       notification: { title, body },
       data: data || {},
+      webpush: {
+        notification: {
+          icon: icon || '/logo.svg',
+          badge: '/logo.svg',
+          image: image || undefined
+        },
+        fcmOptions: click_action ? { link: click_action } : undefined
+      },
+      android: {
+        notification: {
+          imageUrl: image || undefined
+        }
+      }
     };
     const response = await admin.messaging().send(message);
     res.json({ status: true, msg: 'Notification sent', response });
@@ -36,8 +49,7 @@ exports.sendNotification = async (req, res) => {
 
 exports.sendSlotCredentials = async (req, res) => {
   try {
-    const { slotId, id, password, title } = req.body;
-    console.log(`Sending slot credentials for Slot ID: ${slotId}, ID: ${id}`);
+    const { slotId, id, password, title, icon, image } = req.body;
 
     if (!slotId || !id || !password) {
       return res.status(400).json({ status: false, msg: 'slotId, id, and password are required' });
@@ -53,11 +65,7 @@ exports.sendSlotCredentials = async (req, res) => {
     const bookings = await Booking.find({ slot: slotId }).populate('user');
     let notified = 0;
     for (const booking of bookings) {
-        console.log(`Notifying user for Booking ID: ${booking._id}`);
       const user = await User.findById(booking.userId);
-      console.log(`User found: ${user ? user.email : 'Unknown'}`);
-
-      console.log(`User Device Token: ${user.deviceToken}`);
       if (user && user.deviceToken) {
         try {
           await admin.messaging().send({
@@ -66,7 +74,17 @@ exports.sendSlotCredentials = async (req, res) => {
               title: title || 'Match Credentials',
               body: `ID: ${id}, Password: ${password}`
             },
-            data: { slotId: String(slotId), id, password }
+            data: { slotId: String(slotId), id, password },
+            webpush: {
+              notification: {
+                icon: icon || '/logo.svg',
+                badge: '/logo.svg',
+                image: image || undefined
+              }
+            },
+            android: {
+              notification: { imageUrl: image || undefined }
+            }
           });
           notified++;
         } catch (e) {
@@ -83,7 +101,7 @@ exports.sendSlotCredentials = async (req, res) => {
 // Send announcement notification to all users with a deviceToken
 exports.sendAnnouncement = async (req, res) => {
   try {
-    const { title, body } = req.body;
+    const { title, body, icon } = req.body;
     if (!title || !body) {
       return res.status(400).json({ status: false, msg: 'title and body are required' });
     }
@@ -91,18 +109,20 @@ exports.sendAnnouncement = async (req, res) => {
     const users = await User.find({ deviceToken: { $ne: null } });
     let notified = 0;
     for (const user of users) {
-      try {
-        await admin.messaging().send({
-          token: user.deviceToken,
-          notification: { title, body },
-          data: { type: 'announcement' }
-        });
-        notified++;
-      } catch (e) {
-        // log error but continue
+      const tokens = Array.isArray(user.deviceToken) ? user.deviceToken : [user.deviceToken];
+      for (const token of tokens) {
+        try {
+          await admin.messaging().send({
+            token,
+            notification: { title, body , icon},
+            data: { type: 'announcement' }
+          });
+          notified++;
+        } catch (e) {
+        }
       }
     }
-    res.json({ status: true, msg: `Announcement sent to ${notified} users.` });
+    res.json({ status: true, msg: `Announcement sent to ${notified} tokens.` });
   } catch (err) {
     res.status(500).json({ status: false, msg: 'Failed to send announcement', error: err.message });
   }

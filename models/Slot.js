@@ -222,7 +222,6 @@ slotSchema.pre('save', async function(next) {
       // Find the highest matchIndex and increment by 1
       const lastSlot = await mongoose.model('Slot').findOne({}).sort({ matchIndex: -1 }).exec();
       this.matchIndex = lastSlot && lastSlot.matchIndex ? lastSlot.matchIndex + 1 : 1;
-      console.log('Auto-assigned matchIndex:', this.matchIndex);
     } catch (error) {
       console.error('Error auto-incrementing matchIndex:', error);
       return next(error);

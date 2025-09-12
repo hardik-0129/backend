@@ -125,15 +125,6 @@ const compressGameTypeImage = async (req, res, next) => {
     const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
     const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
 
-    // Log compression details
-    console.log('=== GAME TYPE IMAGE COMPRESSION ===');
-    console.log(`Original File: ${req.file.originalname}`);
-    console.log(`Original Size: ${originalSizeKB} KB (${originalSizeMB} MB)`);
-    console.log(`Compressed Size: ${fileSizeKB} KB (${fileSizeMB} MB)`);
-    console.log(`Compression Ratio: ${compressionRatio}% reduction`);
-    console.log(`Space Saved: ${originalSizeKB - fileSizeKB} KB (${Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100} MB)`);
-    console.log('===================================');
-
     // Update req.file to match the compressed file
     req.file.filename = filename;
     req.file.path = outputPath;
@@ -198,15 +189,6 @@ const compressGameModeImage = async (req, res, next) => {
     const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
     const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
 
-    // Log compression details
-    console.log('=== GAME MODE IMAGE COMPRESSION ===');
-    console.log(`Original File: ${req.file.originalname}`);
-    console.log(`Original Size: ${originalSizeKB} KB (${originalSizeMB} MB)`);
-    console.log(`Compressed Size: ${fileSizeKB} KB (${fileSizeMB} MB)`);
-    console.log(`Compression Ratio: ${compressionRatio}% reduction`);
-    console.log(`Space Saved: ${originalSizeKB - fileSizeKB} KB (${Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100} MB)`);
-    console.log('===================================');
-
     // Update req.file to match the compressed file
     req.file.filename = filename;
     req.file.path = outputPath;
@@ -260,11 +242,6 @@ router.post('/gametypes', authentication, upload.single('image'), compressGameTy
     });
   }
   
-  // Log the received data for debugging
-  console.log('Creating game type with:', {
-    gameType: req.body.gameType,
-    image: req.file ? req.file.filename : 'No image uploaded'
-  });
   
   // Continue to the controller
   next();
@@ -283,11 +260,6 @@ router.put('/gametypes/:id', authentication, upload.single('image'), compressGam
     });
   }
   
-  // Log the received data for debugging
-  console.log('Updating game type with ID:', req.params.id, {
-    gameType: req.body.gameType,
-    image: req.file ? req.file.filename : 'No new image uploaded'
-  });
   
   // Continue to the controller
   next();
@@ -314,12 +286,6 @@ router.post('/gamemodes', authentication, gameModeUpload.single('image'), compre
     });
   }
   
-  // Log the received data for debugging
-  console.log('Creating new game mode:', {
-    gameMode: req.body.gameMode,
-    image: req.file ? req.file.filename : 'No image uploaded'
-  });
-  
   // Continue to the controller
   next();
 }, createGameMode);
@@ -336,12 +302,6 @@ router.put('/gamemodes/:id', authentication, gameModeUpload.single('image'), com
       msg: 'Game mode name is required'
     });
   }
-  
-  // Log the received data for debugging
-  console.log('Updating game mode with ID:', req.params.id, {
-    gameMode: req.body.gameMode,
-    image: req.file ? req.file.filename : 'No new image uploaded'
-  });
   
   // Continue to the controller
   next();

@@ -448,10 +448,6 @@ exports.createGameType = async (req, res) => {
     // Get gameType and subCategory from request body
     const { gameType, subCategory } = req.body;
     
-    // Debug information to help troubleshoot
-    console.log('Request body:', req.body);
-    console.log('File info:', req.file);
-    
     // Check if required fields are provided
     if (!gameType) {
       return res.status(400).json({
@@ -465,15 +461,12 @@ exports.createGameType = async (req, res) => {
     if (req.file) {
       // If a file was uploaded, use the file path
       imagePath = `/uploads/gametypes/${req.file.filename}`;
-      console.log('Image path from uploaded file:', imagePath);
     } else if (req.body.image) {
       // If no file was uploaded, check if an image path was provided in the request body
       imagePath = req.body.image;
-      console.log('Image path from request body:', imagePath);
     } else {
       // If no image was provided at all, use a default image path
       imagePath = '/uploads/gametypes/default-gametype.png';
-      console.log('Using default image path:', imagePath);
     }
     
     // Parse subCategory - it might be a JSON string for multiple values
@@ -608,11 +601,7 @@ exports.updateGameType = async (req, res) => {
   try {
     const { id } = req.params;
     const { gameType: newGameTypeName, subCategory } = req.body;
-    
-    // Debug information to help troubleshoot
-    console.log('Request body:', req.body);
-    console.log('File info:', req.file);
-    console.log('Game Type ID:', id);
+          
     
     // Find game type
     const existingGameType = await GameType.findById(id);
@@ -654,11 +643,9 @@ exports.updateGameType = async (req, res) => {
     if (req.file) {
       // If a file was uploaded, use the file path
       updateData.image = `/uploads/gametypes/${req.file.filename}`;
-      console.log('New image path from uploaded file:', updateData.image);
     } else if (req.body.image) {
       // If no file was uploaded, check if an image path was provided in the request body
       updateData.image = req.body.image;
-      console.log('New image path from request body:', updateData.image);
     }
     
     // Update the game type
@@ -751,7 +738,6 @@ exports.getSlotsByCategory = async (req, res) => {
 exports.getSlotsBySlotType = async (req, res) => {
   try {
     const { id , status} = req.body;
-  // log removed
 
     if (!id) {
       return res.status(400).json({
@@ -761,7 +747,6 @@ exports.getSlotsBySlotType = async (req, res) => {
     }
 
     const slotType = await GameType.findById(id);
-  // log removed
     if (!slotType) {
       return res.status(404).json({
         status: false,
@@ -956,9 +941,6 @@ exports.updateGameMode = async (req, res) => {
     if (req.file) {
       updateData.image = `/uploads/gamemodes/${req.file.filename}`;
     }
-    
-    console.log('Updating game mode with data:', updateData);
-    
     // Update the game mode
     const updatedGameMode = await GameMode.findByIdAndUpdate(
       id,

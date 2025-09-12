@@ -1,6 +1,6 @@
 const Banner = require('../models/Banner');
 const { convertBannerToFullUrls, convertBannersToFullUrls, getFullImageUrl } = require('../utils/imageUrl');
-const { compressImage, compressMultipleImages, getImageMetadata, validateImage } = require('../utils/imageCompression');
+const { validateImage } = require('../utils/imageCompression');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
@@ -88,16 +88,7 @@ exports.updateBanner = async (req, res) => {
 // Upload banner image (Admin only)
 exports.uploadBannerImage = async (req, res) => {
   try {
-    console.log('=== BANNER UPLOAD REQUEST ===');
-    console.log('Request received:', req.file ? 'File present' : 'No file');
     if (req.file) {
-      console.log('File details:', {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        sizeKB: Math.round(req.file.size / 1024),
-        sizeMB: Math.round((req.file.size / (1024 * 1024)) * 100) / 100
-      });
     }
     
     if (!req.file) {
@@ -115,8 +106,6 @@ exports.uploadBannerImage = async (req, res) => {
     const originalExt = path.extname(req.file.originalname);
     const filename = `banner-${uniqueSuffix}${originalExt}`;
     const outputPath = path.join(__dirname, '../uploads/banners', filename);
-
-    console.log(outputPath, "outputPath", originalExt, "originalExt");
 
     // Compress the image
     const compressionResult = await sharp(req.file.buffer)
@@ -142,15 +131,6 @@ exports.uploadBannerImage = async (req, res) => {
     const originalSizeKB = Math.round(req.file.size / 1024);
     const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
     const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
-
-    // Log compression details
-    console.log('=== BANNER IMAGE COMPRESSION ===');
-    console.log(`Original File: ${req.file.originalname}`);
-    console.log(`Original Size: ${originalSizeKB} KB (${originalSizeMB} MB)`);
-    console.log(`Compressed Size: ${fileSizeKB} KB (${fileSizeMB} MB)`);
-    console.log(`Compression Ratio: ${compressionRatio}% reduction`);
-    console.log(`Space Saved: ${originalSizeKB - fileSizeKB} KB (${Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100} MB)`);
-    console.log('================================');
 
     // Return the full URL for the uploaded image
     const imagePath = `/uploads/banners/${filename}`;
@@ -263,12 +243,6 @@ exports.uploadMultipleBannerImages = async (req, res) => {
           const originalSizeMB = Math.round((file.size / (1024 * 1024)) * 100) / 100;
           const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
 
-          // Log individual file compression
-          console.log(`--- File: ${file.originalname} ---`);
-          console.log(`Original: ${originalSizeKB} KB (${originalSizeMB} MB)`);
-          console.log(`Compressed: ${fileSizeKB} KB (${fileSizeMB} MB)`);
-          console.log(`Reduction: ${compressionRatio}%`);
-
           const imagePath = `/uploads/banners/${filename}`;
           const fullImageUrl = getFullImageUrl(imagePath);
 
@@ -343,15 +317,7 @@ exports.uploadMultipleBannerImages = async (req, res) => {
     const overallCompressionRatio = Math.round(((totalOriginalSize - totalCompressedSize) / totalOriginalSize) * 100);
     const totalOriginalSizeMB = Math.round((totalOriginalSize / 1024) * 100) / 100;
     const totalCompressedSizeMB = Math.round((totalCompressedSize / 1024) * 100) / 100;
-    
-    // Log overall compression summary
-    console.log('=== MULTIPLE IMAGES COMPRESSION SUMMARY ===');
-    console.log(`Total Files Processed: ${relativePaths.length}`);
-    console.log(`Total Original Size: ${totalOriginalSize} KB (${totalOriginalSizeMB} MB)`);
-    console.log(`Total Compressed Size: ${totalCompressedSize} KB (${totalCompressedSizeMB} MB)`);
-    console.log(`Overall Compression Ratio: ${overallCompressionRatio}% reduction`);
-    console.log(`Total Space Saved: ${totalOriginalSize - totalCompressedSize} KB (${Math.round(((totalOriginalSizeMB - totalCompressedSizeMB) * 100)) / 100} MB)`);
-    console.log('==========================================');
+  
     
     res.json({
       msg: `${relativePaths.length} images uploaded and compressed successfully`,

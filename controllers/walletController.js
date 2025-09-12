@@ -35,25 +35,16 @@ exports.checkOrderStatus = async (req, res) => {
     });
     const data = await response.json();
     if (data.status === 'COMPLETED') {
-      // Try to extract userId from order_id (format: ORDER_<userId>_<timestamp>)
-      // let userId = null;
-      // if (order_id && order_id.startsWith('ORDER_')) {
-      //   const parts = order_id.split('_');
-      //   if (parts.length >= 3) {
-      //     userId = parts[1];
-      //   }
-      // }
+      
       let user = null;
       if (userId) {
         user = await User.findById(userId);
       }
       if (user) {
-        console.log(`User found: ${user._id}`);
 
         // Only credit if not already credited for this order
         const existing = await Transaction.findOne({ transactionId: order_id, userId: user._id });
         if (!existing) {
-          console.log(`Crediting user ${user._id} with amount: ${data.result.amount}`);
           user.wallet += parseFloat(data.result.amount);
           await user.save();
           await createTransaction({
@@ -69,8 +60,6 @@ exports.checkOrderStatus = async (req, res) => {
           });
         }
       }
-      console.log(`TranzUPI: Order ${order_id} status checked - ${data.status}`);
-
       return res.json({ success: true, result: data.result });
     } else {
       return res.status(400).json({ success: false, message: data.message });
@@ -80,99 +69,66 @@ exports.checkOrderStatus = async (req, res) => {
   }
 };
 
-// Webhook for TranzUPI payment status (Add Money)
-// Accepts payloads containing either order_id or transaction_id
-// Expected fields: status/success, amount, signature (optional), remark1 (can carry userId)
 exports.tranzupiWebhook = async (req, res) => {
   try {
-    // Log every hit to verify webhook fires
-    console.log('🔔 TranzUPI Webhook HIT');
-    console.log('Headers:', JSON.stringify(req.headers || {}, null, 2));
-    console.log('Body:', JSON.stringify(req.body || {}, null, 2));
-
     const body = req.body || {};
-    const status = (body.status || body.success || '').toString().toLowerCase();
     const orderId = body.order_id || body.orderId || body.transaction_id || body.txn_id;
     const amount = parseFloat(body.amount || body.txn_amount || 0);
-    const signature = body.signature || body.sign || '';
     const remark1 = body.remark1 || body.meta || '';
 
     if (!orderId || !amount) {
-      console.log('❌ Missing orderId/amount in webhook');
       return res.status(400).json({ success: false, error: 'order_id/transaction_id and amount are required' });
     }
 
-    // Verify signature if provided by gateway
-    if (signature) {
-      try {
-        const signatureString = `${orderId}|${status.includes('success') ? 'success' : status}|${amount}|${TRANZUPI_CONFIG.secret_key}`;
-        const expected = crypto.createHash('sha256').update(signatureString).digest('hex');
-        if (expected !== signature) {
-          console.log('❌ Signature mismatch');
-          return res.status(400).json({ success: false, error: 'Invalid signature' });
-        }
-      } catch (e) {
-        console.error('Webhook signature verify error:', e.message);
-      }
-    }
-
-    // Idempotency: if transaction already recorded, acknowledge
+    // Idempotency check
     const existing = await Transaction.findOne({ transactionId: orderId });
     if (existing) {
-      console.log('ℹ️ Webhook already processed for', orderId);
       return res.json({ success: true, message: 'Already processed' });
     }
 
-    if (status === 'success' || status === 'completed' || status === 'successfull' || status === 'successful' || status === 'paid') {
-      // Resolve user
-      let user = null;
-      // 1) If remark1 carries userId
-      if (remark1) {
-        try { user = await User.findById(remark1); } catch (_) {}
+    // Resolve user
+    let user = null;
+    if (remark1) {
+      try { user = await User.findById(remark1); } catch (_) {}
+    }
+    if (!user && typeof orderId === 'string' && orderId.includes('_')) {
+      const parts = orderId.split('_');
+      if (parts.length >= 3) {
+        const idPart = parts[1];
+        try {
+          user = await User.findOne({ _id: { $regex: new RegExp(idPart + '$') } });
+        } catch (_) {}
       }
-      // 2) Try to parse from order id formats like ORDER_<userId>_<ts>
-      if (!user && typeof orderId === 'string' && orderId.includes('_')) {
-        const parts = orderId.split('_');
-        if (parts.length >= 3) {
-          const idPart = parts[1];
-          try {
-            user = await User.findOne({ _id: { $regex: new RegExp(idPart + '$') } });
-          } catch (_) {}
-        }
-      }
-
-      if (!user) {
-        console.log('❌ User not found for webhook. orderId:', orderId, 'remark1:', remark1);
-        return res.status(404).json({ success: false, error: 'User not found for this payment' });
-      }
-
-      user.wallet += amount;
-      await user.save();
-
-      await createTransaction({
-        userId: user._id,
-        type: 'CREDIT',
-        amount: amount,
-        description: `TranzUPI payment - Order: ${orderId}`,
-        transactionId: orderId,
-        status: 'SUCCESS',
-        paymentMethod: 'TRANZUPI',
-        balanceAfter: user.wallet,
-        metadata: { orderId, remark1 }
-      });
-
-      // Emit wallet update
-      try {
-        const { emitWalletUpdate } = require('../websocket');
-        emitWalletUpdate(user._id.toString(), user.wallet);
-      } catch (e) { console.error('Socket emit error:', e); }
-
-      console.log('✅ Webhook processed: wallet credited', { userId: user._id.toString(), amount, orderId });
-      return res.json({ success: true });
     }
 
-    console.log('❌ Invalid status in webhook:', status);
-    return res.status(400).json({ success: false, error: `Invalid status: ${status}` });
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found for this payment' });
+    }
+
+    // Credit wallet
+    user.wallet += amount;
+    await user.save();
+
+    await createTransaction({
+      userId: user._id,
+      type: 'CREDIT',
+      amount: amount,
+      description: `TranzUPI payment - Order: ${orderId}`,
+      transactionId: orderId,
+      status: 'SUCCESS',
+      paymentMethod: 'TRANZUPI',
+      balanceAfter: user.wallet,
+      metadata: { orderId, remark1 }
+    });
+
+    // Emit wallet update via websocket
+    try {
+      const { emitWalletUpdate } = require('../websocket');
+      emitWalletUpdate(user._id.toString(), user.wallet);
+    } catch (e) { console.error('Socket emit error:', e); }
+
+    return res.json({ success: true });
+
   } catch (err) {
     console.error('TranzUPI Webhook Error:', err);
     return res.status(500).json({ success: false, error: 'Webhook processing failed' });
@@ -372,7 +328,6 @@ exports.getTransactionHistory = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    console.log(`Fetched ${transactions.length} transactions and ${bookings.length} bookings for user ${userId}`);
     res.status(200).json({
       success: true,
       transactions,
@@ -594,19 +549,8 @@ exports.createTranzUPIOrder = async (req, res) => {
     const { customerMobile, amount, orderId, redirectUrl, remark1, remark2 } = req.body;
     const userToken = process.env.TRANZUPI_API_KEY;
     const api = new CreateOrderAPI('https://tranzupi.com/api/create-order');
-    console.log('Creating TranzUPI order:', {
-      customerMobile,
-      userToken,
-      amount,
-      orderId,
-      redirectUrl,
-      remark1,
-      remark2,
-      api
-    });
 
     const order = await api.createOrder(customerMobile, userToken, amount, orderId, redirectUrl, remark1, remark2);
-    console.log('TranzUPI order created successfully:', order);
     res.status(200).json({ success: true, order });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -631,8 +575,6 @@ exports.tranzupiCallback = async (req, res) => {
           // Use existing add-funds logic instead of direct wallet update
           user.wallet += parseFloat(amount);
           await user.save();
-          
-          console.log(`TranzUPI Mock: Added ₹${amount} to user ${user.email} wallet via existing API`);
         }
       }
       return res.json({ success: true });
@@ -681,8 +623,6 @@ exports.tranzupiCallback = async (req, res) => {
         } catch (e) {
           console.error('Socket emit error:', e);
         }
-
-        console.log(`TranzUPI: Added ₹${amount} to user ${user.email} wallet and created transaction record`);
       }
     }
 
@@ -899,7 +839,6 @@ exports.tranzupiWithdrawalCallback = async (req, res) => {
       // If withdrawal failed, refund the amount
       user.wallet += parseFloat(amount);
       await user.save();
-      console.log(`TranzUPI: Refunded ₹${amount} to user ${user.email} wallet due to failed withdrawal`);
     }
 
     res.json({ success: true });
@@ -988,15 +927,9 @@ exports.getReferralEarnings = async (req, res) => {
         { 'metadata.bonusType': { $in: ['signup_referral', 'first_paid_match_referral'] } }
       ]
     };
-    
-    console.log('🔍 Referral earnings query:', JSON.stringify(query, null, 2));
-    
+        
     const referralTxns = await Transaction.find(query).sort({ createdAt: -1 }).lean();
     
-    console.log('🔍 Found referral transactions:', referralTxns.length);
-    referralTxns.forEach((txn, index) => {
-      console.log(`   ${index + 1}. ${txn.description} - Amount: ${txn.amount}`);
-    });
     res.status(200).json({
       success: true,
       referralEarnings: referralTxns

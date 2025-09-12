@@ -47,5 +47,4 @@
 //     'testremark', // remark1
 //     'testremark2' // remark2
 // )
-// .then(order => console.log('Order created:', order))
 // .catch(error => console.error('Order creation failed:', error));

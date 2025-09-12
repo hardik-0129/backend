@@ -199,12 +199,7 @@ exports.updateProfilePhoto = async (req, res) => {
   try {
     const userId = req.user?.userId || req.user?._id;
     
-    console.log('Profile photo upload request received');
-    console.log('User ID:', userId);
-    console.log('File received:', req.file);
-    
     if (!req.file) {
-      console.log('No file received in request');
       return res.status(400).json({
         status: false,
         message: 'No profile photo uploaded'
@@ -265,27 +260,11 @@ exports.updateProfilePhoto = async (req, res) => {
 
     // Get file info for logging
     const stats = fs.statSync(outputPath);
-    const fileSizeKB = Math.round(stats.size / 1024);
-    const fileSizeMB = Math.round((stats.size / (1024 * 1024)) * 100) / 100;
-    const originalSizeKB = Math.round(req.file.size / 1024);
-    const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
-    const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
-
-    // Log compression details
-    console.log('=== PROFILE PHOTO COMPRESSION ===');
-    console.log(`User ID: ${userId}`);
-    console.log(`Original File: ${req.file.originalname}`);
-    console.log(`Original Size: ${originalSizeKB} KB (${originalSizeMB} MB)`);
-    console.log(`Compressed Size: ${fileSizeKB} KB (${fileSizeMB} MB)`);
-    console.log(`Compression Ratio: ${compressionRatio}% reduction`);
-    console.log(`Space Saved: ${originalSizeKB - fileSizeKB} KB (${Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100} MB)`);
-    console.log('================================');
     
     // Update user profile photo in database
     user.profilePhoto = `/uploads/profile-photos/${filename}`;
     await user.save();
     
-    console.log('Profile photo updated successfully:', user.profilePhoto);
     
     return res.json({
       status: true,

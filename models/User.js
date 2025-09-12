@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema({
   otp: { type: String, default: null },
   otpExpires: { type: Date, default: null },
   otpVerified: { type: Boolean, default: false },
-  deviceToken: { type: String, default: null },
+  deviceToken: { type: [String] , default: [] },
   profilePhoto: { type: String, default: null }
 }, { timestamps: true });
 

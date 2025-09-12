@@ -17,7 +17,7 @@ const { startCronJobs } = require('./services/cronJobs');
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://192.168.1.6:8080'],
+  origin: ['http://localhost:8080', 'http://192.168.1.5:8080', "https://api1.alphalions.io"],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));

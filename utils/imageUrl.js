@@ -1,17 +1,22 @@
 const getFullImageUrl = (imagePath) => {
   if (!imagePath) return null;
-  
-  if (imagePath.includes('localhost:5000')) {
-    return imagePath.replace('localhost:5000', '192.168.1.6:5000');
+
+  const baseUrl = 'https://api1.alphalions.io';
+
+  // Always normalize to the path that starts at /uploads
+  const uploadsIndex = imagePath.indexOf('/uploads/');
+  if (uploadsIndex !== -1) {
+    const uploadsPath = imagePath.substring(uploadsIndex); // e.g. /uploads/banners/...
+    return `${baseUrl}${uploadsPath}`;
   }
-  
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+
+  // If already an absolute HTTPS URL but not /uploads (leave as-is)
+  if (imagePath.startsWith('https://')) {
     return imagePath;
   }
-  
-  const baseUrl = 'http://192.168.1.6:5000';
+
+  // Fallback: treat as relative path
   const normalizedPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
-  
   return `${baseUrl}${normalizedPath}`;
 };
 
