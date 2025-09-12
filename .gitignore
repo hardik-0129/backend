@@ -15,9 +15,6 @@ pids
 *.seed
 *.pid.lock
 
-# dotenv environment files
-.env
-.env.*.local
 
 # Service account / cloud keys
 *.json
