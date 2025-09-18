@@ -8,22 +8,19 @@ const fs = require('fs');
 // Get active banner
 exports.getBanner = async (req, res) => {
   try {
-    // Get the active banner or create default if none exists
-    let banner = await Banner.findOne({ isActive: true });
-    
+    // Get the active banner. If none, return empty fields (no defaults)
+    const banner = await Banner.findOne({ isActive: true });
     if (!banner) {
-      // Create default banner if none exists
-      banner = new Banner({
-        title: 'BOOK YOUR SPOT.\nDOMINATE THE ARENA.',
-        description: 'Join daily Free Fire & Squad Tournaments.\nCompete, Win, Get Rewarded.',
-        buttonText: 'VIEW TOURNAMENTS',
+      return res.json({
+        title: '',
+        description: '',
+        buttonText: '',
         backgroundImage: '/assets/banner/banner.jpg',
-        isActive: true
+        bannerImages: [],
+        isActive: false
       });
-      await banner.save();
     }
 
-    // Convert to full URLs before sending response
     const bannerWithFullUrls = convertBannerToFullUrls(banner);
     res.json(bannerWithFullUrls);
   } catch (error) {
@@ -37,22 +34,15 @@ exports.updateBanner = async (req, res) => {
   try {
     const { title, description, buttonText, backgroundImage, bannerImages } = req.body;
 
-    // Validate required fields
-    if (!title || !description || !buttonText) {
-      return res.status(400).json({ 
-        msg: 'Missing required fields: title, description, buttonText' 
-      });
-    }
-
     // Find existing active banner or create new one
     let banner = await Banner.findOne({ isActive: true });
     
     if (banner) {
-      // Update existing banner
-      banner.title = title;
-      banner.description = description;
-      banner.buttonText = buttonText;
-      if (backgroundImage) {
+      // Update existing banner, only fields provided
+      if (typeof title === 'string') banner.title = title;
+      if (typeof description === 'string') banner.description = description;
+      if (typeof buttonText === 'string') banner.buttonText = buttonText;
+      if (typeof backgroundImage === 'string' && backgroundImage) {
         banner.backgroundImage = backgroundImage;
       }
       if (bannerImages && Array.isArray(bannerImages)) {
@@ -60,12 +50,12 @@ exports.updateBanner = async (req, res) => {
       }
       banner.updatedAt = Date.now();
     } else {
-      // Create new banner
+      // Create new banner with optional fields
       banner = new Banner({
-        title,
-        description,
-        buttonText,
-        backgroundImage: backgroundImage || '/assets/banner/banner.jpg',
+        title: typeof title === 'string' ? title : '',
+        description: typeof description === 'string' ? description : '',
+        buttonText: typeof buttonText === 'string' ? buttonText : '',
+        backgroundImage: typeof backgroundImage === 'string' && backgroundImage ? backgroundImage : '/assets/banner/banner.jpg',
         bannerImages: bannerImages || [],
         isActive: true
       });
@@ -140,15 +130,29 @@ exports.uploadBannerImage = async (req, res) => {
     let banner = await Banner.findOne({ isActive: true });
     
     if (!banner) {
-      // Create a new banner if none exists
+      // Create a new banner shell without default text
       banner = new Banner({
-        title: 'Default Banner',
-        description: 'Default banner description',
-        buttonText: 'VIEW TOURNAMENTS',
+        title: '',
+        description: '',
+        buttonText: '',
         bannerImages: [],
         isActive: true
       });
     }
+
+    // If metadata provided in multipart body, update banner text fields
+    const { title, description, buttonText } = req.body || {};
+    if (typeof title === 'string') banner.title = title;
+    if (typeof description === 'string') banner.description = description;
+    if (typeof buttonText === 'string') banner.buttonText = buttonText;
+
+    // Also push image with per-image metadata into imageGallery
+    banner.imageGallery.push({
+      url: imagePath,
+      title: typeof title === 'string' ? title : '',
+      description: typeof description === 'string' ? description : '',
+      buttonText: typeof buttonText === 'string' ? buttonText : ''
+    });
 
     // Add new image to the bannerImages array
     banner.bannerImages.push(imagePath);
@@ -295,11 +299,11 @@ exports.uploadMultipleBannerImages = async (req, res) => {
     let banner = await Banner.findOne({ isActive: true });
     
     if (!banner) {
-      // Create a new banner if none exists
+      // Create a new banner shell without default text
       banner = new Banner({
-        title: 'Default Banner',
-        description: 'Default banner description',
-        buttonText: 'VIEW TOURNAMENTS',
+        title: '',
+        description: '',
+        buttonText: '',
         bannerImages: [],
         isActive: true
       });
@@ -503,20 +507,37 @@ exports.setActiveBanner = async (req, res) => {
 exports.deleteBanner = async (req, res) => {
   try {
     const { bannerId } = req.params;
+    console.log('Delete banner request for ID:', bannerId);
 
     const banner = await Banner.findById(bannerId);
     if (!banner) {
+      console.log('Banner not found for ID:', bannerId);
       return res.status(404).json({ msg: 'Banner not found' });
     }
 
-    // Don't allow deletion of active banner
+    console.log('Found banner:', { id: banner._id, isActive: banner.isActive, title: banner.title });
+
+    // If deleting active banner, try to activate another; otherwise leave none active
     if (banner.isActive) {
-      return res.status(400).json({ 
-        msg: 'Cannot delete active banner. Please activate another banner first.' 
-      });
+      console.log('Deleting active banner, looking for replacement...');
+
+      const otherBanner = await Banner.findOne({ _id: { $ne: bannerId } });
+      console.log('Other banners found:', otherBanner ? { id: otherBanner._id, title: otherBanner.title } : 'None');
+
+      if (otherBanner) {
+        otherBanner.isActive = true;
+        await otherBanner.save();
+        console.log('Other banner activated successfully');
+      } else {
+        console.log('No other banners found; leaving no active banner.');
+      }
+    } else {
+      console.log('Deleting inactive banner, no replacement needed');
     }
 
+    console.log('Deleting banner:', bannerId);
     await Banner.findByIdAndDelete(bannerId);
+    console.log('Banner deleted successfully');
 
     res.json({ msg: 'Banner deleted successfully' });
   } catch (error) {

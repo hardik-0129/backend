@@ -661,6 +661,40 @@ exports.getPendingWithdrawals = async (req, res) => {
   }
 };
 
+// Get approved withdrawals (Admin only)
+exports.getApprovedWithdrawals = async (req, res) => {
+  try {
+    const approved = await Transaction.find({
+      type: 'WITHDRAW',
+      status: 'ADMIN_APPROVED'
+    })
+    .populate('userId', 'name email phone freeFireUsername referredBy')
+    .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, withdrawals: approved });
+  } catch (err) {
+    console.error('Get Approved Withdrawals Error:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch approved withdrawals', details: err.message });
+  }
+};
+
+// Get rejected withdrawals (Admin only)
+exports.getRejectedWithdrawals = async (req, res) => {
+  try {
+    const rejected = await Transaction.find({
+      type: 'WITHDRAW',
+      status: 'ADMIN_REJECTED'
+    })
+    .populate('userId', 'name email phone freeFireUsername referredBy')
+    .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, withdrawals: rejected });
+  } catch (err) {
+    console.error('Get Rejected Withdrawals Error:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch rejected withdrawals', details: err.message });
+  }
+};
+
 // Approve withdrawal request (Admin only)
 exports.approveWithdrawal = async (req, res) => {
   try {

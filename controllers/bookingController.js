@@ -203,6 +203,31 @@ exports.createBooking = async (req, res) => {
       user.wallet -= totalAmount;
       await user.save();
       
+      // Create transaction record for match booking
+      try {
+        const Transaction = require('../models/Transaction');
+        const transactionId = `BOOKING_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        await Transaction.create({
+          userId: user._id,
+          type: 'BOOKING',
+          amount: totalAmount,
+          description: `Match booking - ${slot.matchTitle || slot.slotType} - ${positionsCount} position${positionsCount > 1 ? 's' : ''}`,
+          transactionId: transactionId,
+          status: 'SUCCESS',
+          paymentMethod: 'WALLET',
+          balanceAfter: user.wallet,
+          metadata: {
+            slotId: slot._id.toString(),
+            gameId: slot._id.toString(),
+            referenceId: transactionId
+          }
+        });
+      } catch (error) {
+        console.error('Error creating booking transaction:', error);
+        // Don't fail the booking if transaction creation fails
+      }
+      
       // Process referral bonus for first paid match
       await processReferralFirstPaidBonus(user, slot);
       
@@ -257,6 +282,32 @@ exports.createBooking = async (req, res) => {
       userBooking.playerNames = new Map(Object.entries(existingPlayerNames));
       userBooking.playerIndex = mergedPlayerIndex;
       await userBooking.save();
+
+      // Create transaction record for additional positions booking
+      if (!isFreeMachatch && totalAmount > 0) {
+        try {
+          const Transaction = require('../models/Transaction');
+          const transactionId = `BOOKING_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          await Transaction.create({
+            userId: user._id,
+            type: 'BOOKING',
+            amount: totalAmount,
+            description: `Additional positions - ${slot.matchTitle || slot.slotType} - ${positionsCount} position${positionsCount > 1 ? 's' : ''}`,
+            transactionId: transactionId,
+            status: 'SUCCESS',
+            paymentMethod: 'WALLET',
+            balanceAfter: user.wallet,
+            metadata: {
+              slotId: slot._id.toString(),
+              gameId: slot._id.toString(),
+              referenceId: transactionId
+            }
+          });
+        } catch (error) {
+          console.error('Error creating additional booking transaction:', error);
+        }
+      }
 
       // Process referral bonus for first paid match (in case this is the first paid match)
       if (totalAmount > 0) {

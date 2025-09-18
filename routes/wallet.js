@@ -32,6 +32,8 @@ router.post('/tranzupi/withdraw', authentication, walletController.tranzupiWithd
 router.post('/tranzupi/callback', walletController.tranzupiCallback);
 router.post('/tranzupi/withdrawal-callback', walletController.tranzupiWithdrawalCallback);
 router.get('/admin/pending-withdrawals', authentication, walletController.getPendingWithdrawals);
+router.get('/admin/approved-withdrawals', authentication, walletController.getApprovedWithdrawals);
+router.get('/admin/rejected-withdrawals', authentication, walletController.getRejectedWithdrawals);
 router.post('/admin/approve-withdrawal/:transactionId', authentication, walletController.approveWithdrawal);
 router.post('/admin/reject-withdrawal/:transactionId', authentication, walletController.rejectWithdrawal);
 

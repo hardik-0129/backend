@@ -3,18 +3,18 @@ const mongoose = require('mongoose');
 const bannerSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: true,
-    default: 'BOOK YOUR SPOT.\nDOMINATE THE ARENA.'
+    required: false,
+    default: ''
   },
   description: {
     type: String,
-    required: true,
-    default: 'Join daily Free Fire & Squad Tournaments.\nCompete, Win, Get Rewarded.'
+    required: false,
+    default: ''
   },
   buttonText: {
     type: String,
-    required: true,
-    default: 'VIEW TOURNAMENTS'
+    required: false,
+    default: ''
   },
   backgroundImage: {
     type: String,
@@ -30,6 +30,9 @@ const bannerSchema = new mongoose.Schema({
       type: String,
       required: true
     },
+    title: { type: String, default: '' },
+    description: { type: String, default: '' },
+    buttonText: { type: String, default: '' },
     alt: {
       type: String,
       default: 'Banner Image'

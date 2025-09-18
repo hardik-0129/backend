@@ -28,7 +28,13 @@ const convertBannerToFullUrls = (banner) => {
   return {
     ...bannerObj,
     backgroundImage: getFullImageUrl(bannerObj.backgroundImage),
-    bannerImages: bannerObj.bannerImages?.map(img => getFullImageUrl(img)) || []
+    bannerImages: bannerObj.bannerImages?.map(img => getFullImageUrl(img)) || [],
+    imageGallery: Array.isArray(bannerObj.imageGallery)
+      ? bannerObj.imageGallery.map((g) => ({
+          ...g,
+          url: getFullImageUrl(g.url)
+        }))
+      : []
   };
 };
 

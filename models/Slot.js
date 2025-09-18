@@ -63,12 +63,12 @@ const slotSchema = new mongoose.Schema({
   },
   mapName: {
     type: String,
-    enum: ['Bermuda', 'Purgatory', 'Kalahari', 'Alpine'],
     default: 'Bermuda'
   },
   gameMode: {
     type: String,
-    required: true
+    required: true,
+    default: 'Solo'
   },
   tournamentName: {
     type: String,

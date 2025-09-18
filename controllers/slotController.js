@@ -2,6 +2,7 @@ const Slot = require('../models/Slot');
 const Booking = require('../models/Booking');
 const GameType = require('../models/GameType');
 const GameMode = require('../models/GameMode');
+const GameMap = require('../models/GameMap');
 const { getFullImageUrl } = require('../utils/imageUrl');
 
 const convertSlotToFullUrls = (slot) => {
@@ -971,5 +972,72 @@ exports.updateGameMode = async (req, res) => {
       msg: 'Server error while updating game mode',
       error: error.message
     });
+  }
+};
+
+// ===== Game Map Controllers =====
+
+// Create a new game map
+exports.createGameMap = async (req, res) => {
+  try {
+    const { gameMap } = req.body;
+    if (!gameMap) {
+      return res.status(400).json({ status: false, msg: 'Game map name is required' });
+    }
+    const existing = await GameMap.findOne({ gameMap: { $regex: new RegExp('^' + gameMap + '$', 'i') } });
+    if (existing) {
+      // If previously soft-deleted, re-activate instead of erroring
+      if (existing.isActive === false) {
+        existing.isActive = true;
+        await existing.save();
+        return res.status(200).json({ status: true, msg: 'Game map reactivated', gameMap: existing });
+      }
+      return res.status(400).json({ status: false, msg: 'Game map already exists' });
+    }
+    const created = await GameMap.create({ gameMap });
+    res.status(201).json({ status: true, msg: 'Game map created successfully', gameMap: created });
+  } catch (error) {
+    res.status(500).json({ status: false, msg: 'Server error while creating game map', error: error.message });
+  }
+};
+
+// Get all game maps
+exports.getAllGameMaps = async (req, res) => {
+  try {
+    const maps = await GameMap.find({ isActive: true }).sort({ createdAt: -1 });
+    res.status(200).json(maps);
+  } catch (error) {
+    res.status(500).json({ status: false, msg: 'Server error while fetching game maps', error: error.message });
+  }
+};
+
+// Update game map
+exports.updateGameMap = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { gameMap } = req.body;
+    if (!id) return res.status(400).json({ status: false, msg: 'Game map ID is required' });
+    if (!gameMap) return res.status(400).json({ status: false, msg: 'Game map name is required' });
+    const duplicate = await GameMap.findOne({ gameMap: { $regex: new RegExp('^' + gameMap + '$', 'i') }, _id: { $ne: id } });
+    if (duplicate) return res.status(400).json({ status: false, msg: 'Another game map with this name already exists' });
+    const updated = await GameMap.findByIdAndUpdate(id, { gameMap }, { new: true, runValidators: true });
+    if (!updated) return res.status(404).json({ status: false, msg: 'Game map not found' });
+    res.status(200).json({ status: true, msg: 'Game map updated successfully', gameMap: updated });
+  } catch (error) {
+    res.status(500).json({ status: false, msg: 'Server error while updating game map', error: error.message });
+  }
+};
+
+// Delete game map (soft delete)
+exports.deleteGameMap = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ status: false, msg: 'Game map ID is required' });
+    const existing = await GameMap.findById(id);
+    if (!existing) return res.status(404).json({ status: false, msg: 'Game map not found' });
+    await GameMap.findByIdAndDelete(id);
+    res.status(200).json({ status: true, msg: 'Game map deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ status: false, msg: 'Server error while deleting game map', error: error.message });
   }
 };

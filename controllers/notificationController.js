@@ -61,34 +61,40 @@ exports.sendSlotCredentials = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    // Find all users booked in this slot
-    const bookings = await Booking.find({ slot: slotId }).populate('user');
+    // Find all users with device tokens
+    const users = await User.find({ deviceToken: { $ne: null } });
     let notified = 0;
-    for (const booking of bookings) {
-      const user = await User.findById(booking.userId);
-      if (user && user.deviceToken) {
-        try {
-          await admin.messaging().send({
-            token: user.deviceToken,
-            notification: {
-              title: title || 'Match Credentials',
-              body: `ID: ${id}, Password: ${password}`
-            },
-            data: { slotId: String(slotId), id, password },
-            webpush: {
-              notification: {
-                icon: icon || '/logo.svg',
-                badge: '/logo.svg',
-                image: image || undefined
-              }
-            },
-            android: {
-              notification: { imageUrl: image || undefined }
+    for (const user of users) {
+      if (user.deviceToken) {
+        // Handle both single token and array of tokens
+        const tokens = Array.isArray(user.deviceToken) ? user.deviceToken : [user.deviceToken];
+        for (const token of tokens) {
+          if (token && token.trim()) { // Check if token exists and is not empty
+            try {
+              await admin.messaging().send({
+                token: token,
+                notification: {
+                  title: title || 'Match Credentials',
+                  body: `ID: ${id}, Password: ${password}`
+                },
+                data: { slotId: String(slotId), id, password },
+                webpush: {
+                  notification: {
+                    icon: icon || '/logo.svg',
+                    badge: '/logo.svg',
+                    image: image || undefined
+                  }
+                },
+                android: {
+                  notification: { imageUrl: image || undefined }
+                }
+              });
+              notified++;
+            } catch (e) {
+              console.log('Failed to send notification to token:', token, 'Error:', e.message);
+              // log error but continue
             }
-          });
-          notified++;
-        } catch (e) {
-          // log error but continue
+          }
         }
       }
     }

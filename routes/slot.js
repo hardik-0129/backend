@@ -26,7 +26,11 @@ const {
   createGameMode,
   getAllGameModes,
   deleteGameMode,
-  updateGameMode
+  updateGameMode,
+  createGameMap,
+  getAllGameMaps,
+  updateGameMap,
+  deleteGameMap
 } = require('../controllers/slotController');
 const authentication = require('../middleware/adminAuth');
 
@@ -306,5 +310,21 @@ router.put('/gamemodes/:id', authentication, gameModeUpload.single('image'), com
   // Continue to the controller
   next();
 }, updateGameMode);
+
+// Game Map Routes
+router.get('/gamemaps', getAllGameMaps);
+router.post('/gamemaps', authentication, (req, res, next) => {
+  if (!req.body.gameMap) {
+    return res.status(400).json({ status: false, msg: 'Game map name is required' });
+  }
+  next();
+}, createGameMap);
+router.put('/gamemaps/:id', authentication, (req, res, next) => {
+  if (!req.body.gameMap) {
+    return res.status(400).json({ status: false, msg: 'Game map name is required' });
+  }
+  next();
+}, updateGameMap);
+router.delete('/gamemaps/:id', authentication, deleteGameMap);
 
 module.exports = router;
