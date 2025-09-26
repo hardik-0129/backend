@@ -15,6 +15,7 @@ const authentication = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || '1234567890', { algorithms: ['HS256'] });
     
     req.user = decoded;
+    
     next();
   } catch (error) {
     console.error('JWT Error:', error);

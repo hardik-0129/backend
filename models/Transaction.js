@@ -56,7 +56,9 @@ const transactionSchema = new mongoose.Schema({
     orderId: String,
     gameId: String,
     slotId: String,
-    referenceId: String
+    referenceId: String,
+    cancelReason: String,
+    matchTitle: String
   }
 }, {
   timestamps: true

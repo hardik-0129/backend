@@ -10,6 +10,9 @@ const updateMatchStatuses = async () => {
     });
 
     for (const match of matchesToGoLive) {
+      // Re-check latest status; if cancelled, do not change
+      const fresh = await Slot.findById(match._id).select('status isCancelledPermanently');
+      if (fresh && (fresh.status === 'cancelled' || fresh.isCancelledPermanently)) continue;
       await Slot.findByIdAndUpdate(match._id, { status: 'live' });
     }
 
@@ -20,6 +23,8 @@ const updateMatchStatuses = async () => {
     });
 
     for (const match of matchesToComplete) {
+      const fresh2 = await Slot.findById(match._id).select('status isCancelledPermanently');
+      if (fresh2 && (fresh2.status === 'cancelled' || fresh2.isCancelledPermanently)) continue;
       await Slot.findByIdAndUpdate(match._id, { status: 'completed' });
     }
     
@@ -39,6 +44,8 @@ const startCronJobs = () => {
       });
       
       for (const match of inconsistentMatches) {
+        const fresh3 = await Slot.findById(match._id).select('status');
+        if (fresh3 && fresh3.status === 'cancelled') continue;
         await Slot.findByIdAndUpdate(match._id, { status: 'completed' });
       }
       
@@ -48,12 +55,8 @@ const startCronJobs = () => {
   });
 };
 
-const manualStatusUpdate = async () => {
-  await updateMatchStatuses();
-};
 
 module.exports = {
   startCronJobs,
   updateMatchStatuses,
-  manualStatusUpdate
 };

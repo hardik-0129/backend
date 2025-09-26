@@ -1,5 +1,7 @@
 const Slot = require('../models/Slot');
 const Booking = require('../models/Booking');
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
 const GameType = require('../models/GameType');
 const GameMode = require('../models/GameMode');
 const GameMap = require('../models/GameMap');
@@ -370,7 +372,7 @@ exports.getSlotStats = async (req, res) => {
 exports.updateMatchStatus = async (req, res) => {
   try {
     const { slotId } = req.params;
-    const { status } = req.body;
+    const { status, cancelReason } = req.body;
 
     // Validate status
     const validStatuses = ['upcoming', 'live', 'completed', 'cancelled'];
@@ -385,9 +387,54 @@ exports.updateMatchStatus = async (req, res) => {
       return res.status(404).json({ msg: 'Slot not found' });
     }
 
-    // Update the status
+    // Update the status (and reason if cancelling)
     slot.status = status;
+    if (status === 'cancelled' && cancelReason) {
+      slot.cancelReason = cancelReason;
+    }
     await slot.save();
+
+    // If cancelled, refund all bookings for this slot
+    if (status === 'cancelled') {
+      const bookings = await Booking.find({ slot: slotId, status: { $ne: 'cancelled' } });
+      for (const booking of bookings) {
+        try {
+          // mark booking cancelled
+          booking.status = 'cancelled';
+          await booking.save();
+          // refund user wallet
+          if (booking.user) {
+            const user = await User.findById(booking.user);
+            if (user) {
+              const refundAmount = (booking.totalAmount || booking.entryFee || 0);
+              user.wallet = (user.wallet || 0) + refundAmount;
+              await user.save();
+
+              // Create refund transaction with cancel reason and match title
+              const tx = new Transaction({
+                userId: user._id,
+                type: 'REFUND',
+                amount: refundAmount,
+                description: 'Refund for cancelled match',
+                transactionId: `REFUND_${slotId}_${booking._id}_${Date.now()}`,
+                status: 'SUCCESS',
+                paymentMethod: 'SYSTEM',
+                balanceAfter: user.wallet,
+                metadata: {
+                  slotId: String(slotId),
+                  referenceId: String(booking._id),
+                  cancelReason: cancelReason || slot.cancelReason || '',
+                  matchTitle: slot.matchTitle || `${slot.slotType} Match`
+                }
+              });
+              await tx.save();
+            }
+          }
+        } catch (e) {
+          console.error('Refund error for booking', booking._id, e.message);
+        }
+      }
+    }
 
     res.status(200).json({ 
       msg: 'Match status updated successfully', 
@@ -395,7 +442,8 @@ exports.updateMatchStatus = async (req, res) => {
         _id: slot._id,
         matchTitle: slot.matchTitle,
         status: slot.status,
-        matchTime: slot.matchTime
+        matchTime: slot.matchTime,
+        cancelReason: slot.cancelReason || ''
       }
     });
   } catch (err) {

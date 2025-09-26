@@ -210,6 +210,10 @@ const slotSchema = new mongoose.Schema({
     type: String,
     enum: ['upcoming', 'live', 'completed', 'cancelled'],
     default: 'upcoming'
+  },
+  cancelReason: {
+    type: String,
+    default: ''
   }
 }, {
   timestamps: true

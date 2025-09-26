@@ -10,6 +10,10 @@ const sharp = require('sharp');
 const { validateImage } = require('../utils/imageCompression');
 const User = require('../models/User');
 const authController = require('../controllers/authController');
+const sendOTP = require('../utils/sendOTP');
+const userAuth = require('../middleware/adminAuth');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 const authentication = require('../middleware/adminAuth');
 
 // Helper function to create transaction (import from walletController)
@@ -213,21 +217,202 @@ router.post('/login', async (req, res) => {
           await user.save();
         }
       }
-    const token = jwt.sign({ userId: user._id, name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET, {
-    });
-
-    res.json({
-      status: true,
-      message: 'Login successful',
-      token,
-
-    });
+    if (user.twoFactorEnabled && user.twoFactorType === 'email') {
+      // Send OTP and ask client to verify
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expires = new Date(Date.now() + 60 * 1000);
+      user.otp = otp;
+      user.otpExpires = expires;
+      await user.save();
+      await sendOTP(email, otp);
+      return res.json({ status: true, message: 'OTP sent to email', otpRequired: true, method: 'email' });
+    } else if (user.totpEnabled && user.twoFactorType === 'totp' && user.totpSecret) {
+      // Challenge with TOTP
+      return res.json({ status: true, otpRequired: true, method: 'totp' });
+    } else {
+      const token = jwt.sign({ userId: user._id, name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET, {});
+      return res.json({ status: true, message: 'Login successful', token });
+    }
   } catch (error) {
     console.error(error);
     res.status(500).json({ 
       status: false,
       message: 'Server error occurred during login. Please try again.' 
     });
+  }
+});
+
+// OTP Login: verify
+router.post('/login/verify-otp', async (req, res) => {
+  try {
+    const { email, otp, deviceToken } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ status: false, message: 'Email and OTP are required' });
+    }
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ status: false, message: 'User not found' });
+    if (!user.otp || !user.otpExpires || user.otp !== otp || new Date() > new Date(user.otpExpires)) {
+      return res.status(401).json({ status: false, message: 'Invalid or expired OTP' });
+    }
+    user.otp = null;
+    user.otpExpires = null;
+    if (deviceToken) {
+      if (!user.deviceToken.includes(deviceToken)) {
+        user.deviceToken.push(deviceToken);
+      }
+    }
+    await user.save();
+    const token = jwt.sign({ userId: user._id, name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET, {});
+    return res.json({ status: true, message: 'Login successful', token });
+  } catch (e) {
+    console.error('login/verify-otp error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to verify OTP' });
+  }
+});
+
+// TOTP: init (generate secret + QR)
+router.post('/2fa/totp/init', userAuth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId || String(userId) !== String(req.user.userId)) {
+      return res.status(403).json({ status: false, message: 'Not authorized' });
+    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ status: false, message: 'User not found' });
+
+    const label = `${process.env.TOTP_ISSUER || 'GameZone'}:${user.email}`;
+    const secret = speakeasy.generateSecret({ name: label, length: 20, issuer: process.env.TOTP_ISSUER || 'GameZone' });
+
+    user.totpSecret = secret.base32;
+    user.twoFactorType = 'totp';
+    await user.save();
+
+    const otpauthUrl = secret.otpauth_url;
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+    return res.json({ status: true, secretBase32: secret.base32, otpauthUrl, qrDataUrl });
+  } catch (e) {
+    console.error('totp init error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to init TOTP' });
+  }
+});
+
+// TOTP: verify & activate
+router.post('/2fa/totp/verify', userAuth, async (req, res) => {
+  try {
+    let { userId, token } = req.body;
+    if (!userId || String(userId) !== String(req.user.userId)) {
+      return res.status(403).json({ status: false, message: 'Not authorized' });
+    }
+    const user = await User.findById(userId);
+    if (!user || !user.totpSecret) return res.status(400).json({ status: false, message: 'No TOTP setup found' });
+
+    token = String(token || '').replace(/\s+/g, '');
+    const verified = speakeasy.totp.verify({ secret: String(user.totpSecret), encoding: 'base32', token, window: 2, digits: 6 });
+    if (!verified) return res.status(401).json({ status: false, message: 'Invalid token' });
+
+    user.totpEnabled = true;
+    user.twoFactorType = 'totp';
+    // Ensure only one factor active at a time
+    user.twoFactorEnabled = false;
+    user.totpVerified = true;
+    await user.save();
+    return res.json({ status: true, message: 'TOTP enabled' });
+  } catch (e) {
+    console.error('totp verify error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to verify TOTP' });
+  }
+});
+
+// TOTP: disable
+router.put('/2fa/totp/disable', userAuth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId || String(userId) !== String(req.user.userId)) {
+      return res.status(403).json({ status: false, message: 'Not authorized' });
+    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ status: false, message: 'User not found' });
+    user.totpEnabled = false; // keep secret so user can enable later without re-setup
+    if (user.twoFactorType === 'totp') user.twoFactorType = 'none';
+    await user.save();
+    return res.json({ status: true, message: 'TOTP disabled' });
+  } catch (e) {
+    console.error('totp disable error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to disable TOTP' });
+  }
+});
+
+// TOTP: enable (without re-setup, requires existing secret)
+router.put('/2fa/totp/enable', userAuth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId || String(userId) !== String(req.user.userId)) {
+      return res.status(403).json({ status: false, message: 'Not authorized' });
+    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ status: false, message: 'User not found' });
+    if (!user.totpSecret) return res.status(400).json({ status: false, message: 'No TOTP setup found. Please setup first.' });
+    user.totpEnabled = true;
+    user.twoFactorType = 'totp';
+    user.twoFactorEnabled = false; // disable email OTP when enabling totp
+    await user.save();
+    return res.json({ status: true, message: 'TOTP enabled' });
+  } catch (e) {
+    console.error('totp enable error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to enable TOTP' });
+  }
+});
+
+// Login: verify TOTP and issue token
+router.post('/login/totp-verify', async (req, res) => {
+  try {
+    let { email, token, deviceToken } = req.body;
+    if (!email || !token) return res.status(400).json({ status: false, message: 'Email and token required' });
+    const user = await User.findOne({ email });
+    if (!user || !user.totpEnabled || !user.totpSecret) return res.status(200).json({ status: false, message: 'TOTP not enabled' });
+    token = String(token || '').replace(/\s+/g, '');
+    const ok = speakeasy.totp.verify({ secret: String(user.totpSecret), encoding: 'base32', token, window: 2, digits: 6 });
+    if (!ok) return res.status(200).json({ status: false, message: 'Invalid token' });
+    if (deviceToken && !user.deviceToken.includes(deviceToken)) {
+      user.deviceToken.push(deviceToken);
+      await user.save();
+    }
+    const jwtToken = jwt.sign({ userId: user._id, name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET, {});
+    return res.json({ status: true, message: 'Login successful', token: jwtToken });
+  } catch (e) {
+    console.error('login totp verify error:', e);
+    return res.status(200).json({ status: false, message: 'Failed to verify TOTP' });
+  }
+});
+
+// Toggle two-factor auth for current user (profile)
+router.put('/twofactor', userAuth, async (req, res) => {
+  try {
+    const { enabled, userId } = req.body;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ status: false, message: 'enabled must be boolean' });
+    }
+    // Ensure the caller is updating their own setting
+    if (!userId || String(userId) !== String(req.user.userId)) {
+      return res.status(403).json({ status: false, message: 'Not authorized to update this user' });
+    }
+
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ status: false, message: 'User not found' });
+    user.twoFactorEnabled = enabled;
+    if (enabled) {
+      // Enabling email OTP disables TOTP
+      user.twoFactorType = 'email';
+      user.totpEnabled = false;
+    } else {
+      // If TOTP not enabled, fall back to none
+      if (!user.totpEnabled) user.twoFactorType = 'none';
+    }
+    await user.save();
+    return res.json({ status: true, message: `Two-factor ${enabled ? 'enabled' : 'disabled'}`, twoFactorEnabled: user.twoFactorEnabled });
+  } catch (e) {
+    console.error('toggle twofactor error:', e);
+    return res.status(500).json({ status: false, message: 'Failed to update two-factor setting' });
   }
 });
 

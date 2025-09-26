@@ -280,3 +280,204 @@ exports.updateProfilePhoto = async (req, res) => {
     });
   }
 };
+
+// POST /api/user/verify-alpha-role/:userId
+exports.verifyAlphaRole = async (req, res) => {
+  try {
+    const userId = req.params.userId || req.user?.userId || req.user?._id;
+    const { nftCount, walletAddress } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    if (nftCount === undefined || nftCount === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'NFT count is required'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Calculate alpha role using the static method
+    const calculatedRole = User.calculateAlphaRole(parseInt(nftCount));
+
+    // If a wallet address is provided, ensure it is not already used by another user
+    let finalWallet = (typeof walletAddress === 'string' && /^0x[a-fA-F0-9]{40}$/.test(walletAddress.trim())) ? walletAddress.trim() : null;
+    if (finalWallet) {
+      const existsWithWallet = await User.findOne({ _id: { $ne: user._id }, 'alphaRole.walletAddress': finalWallet }).select('_id');
+      if (existsWithWallet) {
+        return res.status(200).json({ success: false, message: 'This wallet address is already linked to another account.' });
+      }
+    }
+
+    // Update user's alpha role
+    user.alphaRole = {
+      roleName: calculatedRole.roleName,
+      nftCount: parseInt(nftCount),
+      isVerified: true,
+      verificationDate: new Date(),
+      walletAddress: finalWallet || user.alphaRole?.walletAddress
+    };
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'Alpha role verified and saved successfully',
+      userId: userId,
+      alphaRole: {
+        roleName: calculatedRole.roleName,
+        nftCount: parseInt(nftCount),
+        description: calculatedRole.description,
+        isVerified: true,
+        verificationDate: user.alphaRole.verificationDate,
+        walletAddress: user.alphaRole.walletAddress
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verifying alpha role:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Admin function to update user details
+exports.adminUpdateUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { 
+      name, 
+      email, 
+      phone, 
+      freeFireUsername, 
+      wallet, 
+      isAdmin
+    } = req.body;
+
+    // Check if admin is making the request
+    // if (!req.user || !req.user.isAdmin) {
+    //   return res.status(403).json({ success: false, error: 'Admin access required' });
+    // }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Check if email is being changed and if it's already taken by another user
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+      if (existingUser) {
+        return res.status(400).json({ success: false, error: 'Email already exists' });
+      }
+    }
+
+    // Update user fields
+    const updateFields = {};
+    if (name !== undefined) updateFields.name = name;
+    if (email !== undefined) updateFields.email = email;
+    if (phone !== undefined) updateFields.phone = phone;
+    if (freeFireUsername !== undefined) updateFields.freeFireUsername = freeFireUsername;
+    if (wallet !== undefined) updateFields.wallet = parseFloat(wallet);
+    if (isAdmin !== undefined) updateFields.isAdmin = isAdmin;
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      updateFields,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    return res.json({
+      success: true,
+      message: 'User updated successfully',
+      user: {
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        freeFireUsername: updatedUser.freeFireUsername,
+        wallet: updatedUser.wallet,
+        isAdmin: updatedUser.isAdmin,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Error updating user:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};
+
+// GET /api/user/verify-alpha-role/:userId - Check alpha role verification status
+exports.getVerifyAlphaRole = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        status: false,
+        msg: 'User ID is required'
+      });
+    }
+
+    // Validate ObjectId to prevent CastError for values like "null"
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: false,
+        msg: 'Invalid user ID format'
+      });
+    }
+
+    const user = await User.findById(userId).select('-password');
+    if (!user) {
+      return res.status(404).json({
+        status: false,
+        msg: 'User not found'
+      });
+    }
+
+    // Check if user has alpha role verification
+    if (!user.alphaRole || !user.alphaRole.isVerified) {
+      return res.json({
+        status: false,
+        msg: 'This user is not verified'
+      });
+    }
+
+    // Return verified alpha role data
+    return res.json({
+      status: true,
+       msg: 'This user is verified',
+      data: {
+        roleName: user.alphaRole.roleName,
+        nftCount: user.alphaRole.nftCount,
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting alpha role verification:', error);
+    return res.status(500).json({
+      status: false,
+      msg: 'Internal server error'
+    });
+  }
+};

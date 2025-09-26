@@ -272,12 +272,29 @@ exports.getBalance = async (req, res) => {
     }
 
 
-    // Total earnings: sum of all match winnings (from Winner collection)
+    // Total winnings from Winner collection
     const winAgg = await require('../models/Winner').aggregate([
       { $match: { userId: user._id } },
       { $group: { _id: null, total: { $sum: '$winningPrice' } } }
     ]);
-    const totalEarnings = winAgg[0]?.total || 0;
+    const totalWinsFromWinners = winAgg[0]?.total || 0;
+
+    // Include winning credits recorded in Transactions as well
+    const winAggTx = await Transaction.aggregate([
+      { $match: {
+          userId: user._id,
+          status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] },
+          $or: [
+            { type: 'WIN' },
+            { type: 'CREDIT', description: { $regex: /(winning|win\s+credited)/i } },
+            { type: 'CREDIT', 'metadata.category': 'WIN' }
+          ]
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalWinsFromTx = winAggTx[0]?.total || 0;
+    const totalWins = (totalWinsFromWinners || 0) + (totalWinsFromTx || 0);
 
     // Total payouts: sum of all successful DEBIT/WITHDRAW
     const payoutsAgg = await Transaction.aggregate([
@@ -286,10 +303,13 @@ exports.getBalance = async (req, res) => {
     ]);
     const totalPayouts = payoutsAgg[0]?.total || 0;
 
+    // Withdrawable earnings = winnings - payouts (cannot be negative)
+    const withdrawableEarnings = Math.max(0, (totalWins || 0) - (totalPayouts || 0));
+
     res.json({ 
       status: true,
       balance: user.wallet,
-      totalEarnings,
+      totalEarnings: withdrawableEarnings,
       totalPayouts
     });
   } catch (err) {
@@ -716,7 +736,54 @@ exports.approveWithdrawal = async (req, res) => {
 
     const user = transaction.userId;
 
-    // Check if user has sufficient balance
+    // Calculate earning balance (winning money only)
+    let earningBalance = 0;
+    try {
+      const winAgg = await require('../models/Winner').aggregate([
+        { $match: { userId: user._id } },
+        { $group: { _id: null, total: { $sum: '$winningPrice' } } }
+      ]);
+      const totalWinsFromWinners = winAgg[0]?.total || 0;
+
+      // Include winning credits recorded in Transactions as well
+      const winAggTx = await Transaction.aggregate([
+        { $match: {
+            userId: user._id,
+            status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] },
+            $or: [
+              { type: 'WIN' },
+              { type: 'CREDIT', description: { $regex: /(winning|win\s+credited)/i } },
+              { type: 'CREDIT', 'metadata.category': 'WIN' }
+            ]
+          }
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const totalWinsFromTx = winAggTx[0]?.total || 0;
+      const totalWins = (totalWinsFromWinners || 0) + (totalWinsFromTx || 0);
+
+      // Total payouts: sum of all successful DEBIT/WITHDRAW
+      const payoutsAgg = await Transaction.aggregate([
+        { $match: { userId: user._id, type: { $in: ['DEBIT', 'WITHDRAW'] }, status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const totalPayouts = payoutsAgg[0]?.total || 0;
+
+      // Earning balance = total winnings - payouts (cannot be negative)
+      earningBalance = Math.max(0, (totalWins || 0) - (totalPayouts || 0));
+    } catch (e) {
+      earningBalance = 0;
+    }
+
+    // Check if user has sufficient earning balance for withdrawal
+    if (parseFloat(transaction.amount) > earningBalance) {
+      return res.status(400).json({
+        success: false,
+        error: 'Insufficient earnings balance to approve this withdrawal. User can withdraw only from winnings.'
+      });
+    }
+
+    // Check if user has sufficient total wallet balance
     if (user.wallet < transaction.amount) {
       return res.status(400).json({
         success: false,
@@ -724,7 +791,7 @@ exports.approveWithdrawal = async (req, res) => {
       });
     }
 
-    // Process the withdrawal
+    // Process the withdrawal (deduct from overall wallet, earnings already enforced above)
     user.wallet -= transaction.amount;
     await user.save();
 

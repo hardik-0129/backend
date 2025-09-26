@@ -16,11 +16,23 @@ const userSchema = new mongoose.Schema({
   referralFirstPaidCredited: { type: Boolean, default: false },
   totalReferralEarnings: { type: Number, default: 0 },
   totalReferrals: { type: Number, default: 0 },
+  twoFactorEnabled: { type: Boolean, default: false },
+  twoFactorType: { type: String, enum: ['none', 'email', 'totp'], default: 'none' },
+  totpEnabled: { type: Boolean, default: false },
+  totpSecret: { type: String, default: null },
+  totpVerified: { type: Boolean, default: false },
   otp: { type: String, default: null },
   otpExpires: { type: Date, default: null },
   otpVerified: { type: Boolean, default: false },
   deviceToken: { type: [String] , default: [] },
-  profilePhoto: { type: String, default: null }
+  profilePhoto: { type: String, default: null },
+  alphaRole: {
+    roleName: { type: String, default: null },
+    nftCount: { type: Number, default: 0 },
+    isVerified: { type: Boolean, default: false },
+    verificationDate: { type: Date, default: null },
+    walletAddress: { type: String, default: null }
+  }
 }, { timestamps: true });
 
 userSchema.pre('save', async function (next) {
@@ -41,6 +53,41 @@ userSchema.statics.generateReferCode = async function () {
     exists = await this.exists({ referCode: code });
   }
   return code;
+};
+
+// Static method to calculate alpha role based on NFT count
+userSchema.statics.calculateAlphaRole = function (nftCount) {
+  if (nftCount >= 25) {
+    return {
+      roleName: 'King of the Jungle',
+      description: '25 NFTs or above',
+      minNfts: 25
+    };
+  } else if (nftCount >= 10) {
+    return {
+      roleName: 'Pride Alpha',
+      description: '10 NFTs or above',
+      minNfts: 10
+    };
+  } else if (nftCount >= 5) {
+    return {
+      roleName: 'Mane Commander',
+      description: '5 NFTs or above',
+      minNfts: 5
+    };
+  } else if (nftCount >= 1) {
+    return {
+      roleName: 'Lone Cub',
+      description: '1 NFT',
+      minNfts: 1
+    };
+  } else {
+    return {
+      roleName: null,
+      description: 'No NFTs',
+      minNfts: 0
+    };
+  }
 };
 
 const User = mongoose.model('User', userSchema);

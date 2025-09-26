@@ -15,6 +15,9 @@ router.get('/slot-bookings', authentication, adminController.getAllSlotBookings)
 // Clean up orphaned bookings
 router.delete('/cleanup-bookings', authentication, adminController.cleanupOrphanedBookings);
 
+// Update a user's win money (counts in totalEarnings)
+router.post('/update-user-win-money', authentication, adminController.updateUserWinMoney);
+
 // Tournament rules management
 // router.post('/slots/:slotId/tournament-rules', authentication, slotController.addTournamentRules);
 router.put('/slots/:slotId/tournament-rules', authentication, slotController.updateTournamentRules);

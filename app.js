@@ -12,7 +12,9 @@ const slotRoutes = require('./routes/slot');
 const bannerRoutes = require('./routes/banner');
 const winnerRoutes = require('./routes/winner');
 const notificationRoutes = require('./routes/notification');
+const nftRoutes = require('./routes/nft');
 const { startCronJobs } = require('./services/cronJobs');
+const cronScheduler = require('./services/cronScheduler');
 
 const app = express();
 
@@ -25,6 +27,8 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 connectDB();
 startCronJobs();
+// Start NFT count update cron scheduler
+cronScheduler.start();
 app.use('/api', authRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/user', userRoutes);
@@ -37,6 +41,7 @@ app.use('/api/banner', bannerRoutes);
 app.use('/api/v1', slotRoutes); 
 app.use('/api/winners', winnerRoutes);
 app.use('/api/notification', notificationRoutes);
+app.use('/api/nft', nftRoutes);
 app.use('/uploads', express.static('uploads'));
 
 app.use((err, req, res, next) => {
@@ -47,3 +52,5 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT);
 const { initSocket } = require('./websocket');
 initSocket(server);
+
+

@@ -54,7 +54,7 @@ const processReferralFirstPaidBonus = async (user, slot) => {
         // Create transaction for referrer
         await createTransaction({
           userId: referrer._id,
-          type: 'CREDIT',
+          type: 'WIN',
           amount: 5,
           description: `Referral bonus: ${user.name} played first paid match`,
           transactionId: `REF_FIRSTPAID_${referrer._id}_${Date.now()}`,
@@ -65,7 +65,8 @@ const processReferralFirstPaidBonus = async (user, slot) => {
             referredUser: user._id,
             referredUserName: user.name,
             matchId: slot._id,
-            bonusType: 'first_paid_match_referral'
+            bonusType: 'first_paid_match_referral',
+            category: 'WIN'
           }
         });
 

@@ -172,4 +172,171 @@ exports.cleanupOrphanedBookings = async (req, res) => {
   }
 };
 
+// Distribute funds to NFT holders
+exports.distributeFunds = async (req, res) => {
+  try {
+    const { totalAmount, distributions } = req.body;
+
+    // Validate input
+    if (!totalAmount || !distributions || !Array.isArray(distributions)) {
+      return res.status(400).json({ 
+        msg: 'Invalid input. totalAmount and distributions array are required.' 
+      });
+    }
+
+    if (distributions.length === 0) {
+      return res.status(400).json({ 
+        msg: 'No distributions provided.' 
+      });
+    }
+
+    // Validate that the sum of distributions equals total amount (with small tolerance for rounding)
+    const sumOfDistributions = distributions.reduce((sum, dist) => sum + dist.amount, 0);
+    const tolerance = 0.01; // Allow 1 paisa tolerance for rounding
+    if (Math.abs(sumOfDistributions - totalAmount) > tolerance) {
+      return res.status(400).json({ 
+        msg: 'Sum of distributions does not match total amount.' 
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    // Process each distribution
+    for (const distribution of distributions) {
+      try {
+        const { userId, amount } = distribution;
+
+        if (!userId || !amount || amount <= 0) {
+          errors.push({
+            userId,
+            error: 'Invalid userId or amount'
+          });
+          continue;
+        }
+
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+          errors.push({
+            userId,
+            error: 'User not found'
+          });
+          continue;
+        }
+
+        // Update user's wallet balance
+        const currentBalance = user.wallet || 0;
+        const newBalance = currentBalance + amount;
+
+        await User.findByIdAndUpdate(userId, {
+          wallet: newBalance
+        });
+
+        // Create a WIN transaction so it gets counted in totalEarnings
+        const Transaction = require('../models/Transaction');
+        await Transaction.create({
+          userId: user._id,
+          type: 'WIN',
+          amount: amount,
+          description: `NFT Holder Distribution - ${amount} distributed`,
+          transactionId: `NFT_DIST_${user._id}_${Date.now()}`,
+          status: 'SUCCESS',
+          paymentMethod: 'SYSTEM',
+          balanceAfter: newBalance,
+          metadata: { 
+            category: 'WIN',
+            distributionType: 'NFT_HOLDER_DISTRIBUTION'
+          }
+        });
+
+        results.push({
+          userId,
+          userName: user.name,
+          userEmail: user.email,
+          amount,
+          previousBalance: currentBalance,
+          newBalance: newBalance
+        });
+
+      } catch (error) {
+        console.error(`Error processing distribution for user ${distribution.userId}:`, error);
+        errors.push({
+          userId: distribution.userId,
+          error: error.message
+        });
+      }
+    }
+
+    // Return response
+    if (errors.length > 0 && results.length === 0) {
+      return res.status(500).json({
+        msg: 'All distributions failed',
+        errors
+      });
+    }
+
+    res.status(200).json({
+      msg: 'Funds distributed successfully',
+      totalAmount,
+      successfulDistributions: results.length,
+      failedDistributions: errors.length,
+      results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error('Distribute funds error:', error);
+    res.status(500).json({ 
+      msg: 'Server error. Please try again later.',
+      error: error.message 
+    });
+  }
+};
+
+// Admin: add win money to a user (counts towards totalEarnings)
+exports.updateUserWinMoney = async (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+
+    if (!userId || !amount) {
+      return res.status(400).json({ success: false, error: 'userId and amount are required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const amountToAdd = parseFloat(amount);
+    if (isNaN(amountToAdd) || amountToAdd <= 0) {
+      return res.status(400).json({ success: false, error: 'Amount must be a positive number' });
+    }
+
+    // Update wallet balance
+    user.wallet += amountToAdd;
+
+    // Create WIN transaction so it's included in totalEarnings
+    const Transaction = require('../models/Transaction');
+    await Transaction.create({
+      userId: user._id,
+      type: 'WIN',
+      amount: amountToAdd,
+      description: `Admin added Gift money: ₹${amountToAdd}`,
+      transactionId: `ADMIN_WIN_${user._id}_${Date.now()}`,
+      status: 'SUCCESS',
+      paymentMethod: 'SYSTEM',
+      balanceAfter: user.wallet,
+      metadata: { category: 'WIN', adminAdded: true, addedBy: req.user?.adminId }
+    });
+
+    await user.save();
+
+    res.json({ success: true, message: 'Win money added successfully', newBalance: user.wallet });
+  } catch (error) {
+    console.error('Update user win money error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update user win money', details: error.message });
+  }
+};
+
 

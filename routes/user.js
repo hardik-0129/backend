@@ -47,4 +47,13 @@ router.post('/device-token', authentication, userController.saveDeviceToken);
 // Update profile photo (FormData with file upload)
 router.post('/update-profile-photo', authentication, upload.single('profilePhoto'), userController.updateProfilePhoto);
 
+// Verify alpha role based on NFT holdings
+router.post('/verify-alpha-role/:userId', authentication, userController.verifyAlphaRole);
+
+// Admin route to update user details
+router.put('/admin/update/:userId', authentication, userController.adminUpdateUser);
+
+// Get alpha role verification status
+router.get('/verify-alpha-role/:userId', authentication, userController.getVerifyAlphaRole);
+
 module.exports = router;
