@@ -507,37 +507,27 @@ exports.setActiveBanner = async (req, res) => {
 exports.deleteBanner = async (req, res) => {
   try {
     const { bannerId } = req.params;
-    console.log('Delete banner request for ID:', bannerId);
 
     const banner = await Banner.findById(bannerId);
     if (!banner) {
-      console.log('Banner not found for ID:', bannerId);
       return res.status(404).json({ msg: 'Banner not found' });
     }
 
-    console.log('Found banner:', { id: banner._id, isActive: banner.isActive, title: banner.title });
 
     // If deleting active banner, try to activate another; otherwise leave none active
     if (banner.isActive) {
-      console.log('Deleting active banner, looking for replacement...');
 
       const otherBanner = await Banner.findOne({ _id: { $ne: bannerId } });
-      console.log('Other banners found:', otherBanner ? { id: otherBanner._id, title: otherBanner.title } : 'None');
 
       if (otherBanner) {
         otherBanner.isActive = true;
         await otherBanner.save();
-        console.log('Other banner activated successfully');
       } else {
-        console.log('No other banners found; leaving no active banner.');
       }
     } else {
-      console.log('Deleting inactive banner, no replacement needed');
     }
 
-    console.log('Deleting banner:', bannerId);
     await Banner.findByIdAndDelete(bannerId);
-    console.log('Banner deleted successfully');
 
     res.json({ msg: 'Banner deleted successfully' });
   } catch (error) {

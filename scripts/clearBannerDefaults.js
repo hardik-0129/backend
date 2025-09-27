@@ -26,8 +26,6 @@ async function run() {
         }
       }
     );
-
-    console.log('Cleared legacy default banner metadata:', result);
     process.exit(0);
   } catch (err) {
     console.error('Migration failed:', err);

@@ -91,7 +91,6 @@ exports.sendSlotCredentials = async (req, res) => {
               });
               notified++;
             } catch (e) {
-              console.log('Failed to send notification to token:', token, 'Error:', e.message);
               // log error but continue
             }
           }

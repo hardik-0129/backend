@@ -12,20 +12,12 @@ class CronScheduler {
    */
   start() {
     if (this.isRunning) {
-      console.log('Cron scheduler is already running');
       return;
     }
-
-    console.log('Starting cron scheduler...');
     this.isRunning = true;
 
     // Schedule NFT count update every 24 hours at 2:00 AM
     this.scheduleNFTUpdate();
-    
-    // You can add more cron jobs here
-    // this.scheduleOtherJobs();
-
-    console.log('Cron scheduler started successfully');
   }
 
   /**
@@ -33,20 +25,15 @@ class CronScheduler {
    */
   stop() {
     if (!this.isRunning) {
-      console.log('Cron scheduler is not running');
       return;
     }
-
-    console.log('Stopping cron scheduler...');
     
     this.jobs.forEach((job, name) => {
       job.destroy();
-      console.log(`Stopped cron job: ${name}`);
     });
     
     this.jobs.clear();
     this.isRunning = false;
-    console.log('Cron scheduler stopped successfully');
   }
 
   /**
@@ -58,22 +45,12 @@ class CronScheduler {
     const cronExpression = '0 0 2 * * *'; // Every day at 2:00 AM
     
     const job = cron.schedule(cronExpression, async () => {
-      console.log('Starting scheduled NFT count update...');
       const startTime = new Date();
       
       try {
         const result = await nftService.updateAllUsersNFTCount();
         const endTime = new Date();
         const duration = endTime - startTime;
-        
-        console.log(`Scheduled NFT count update completed in ${duration}ms:`, {
-          success: result.success,
-          totalUsers: result.totalUsers,
-          updatedUsers: result.updatedUsers,
-          failedUsers: result.failedUsers,
-          unchangedUsers: result.unchangedUsers
-        });
-
         // Log any errors for failed updates
         if (result.failedUsers > 0) {
           const failedResults = result.results.filter(r => !r.success);
@@ -90,30 +67,15 @@ class CronScheduler {
 
     this.jobs.set('nftUpdate', job);
     job.start();
-    
-    console.log('NFT count update job scheduled to run daily at 2:00 AM UTC');
-  }
+     }
 
   /**
    * Manually trigger NFT count update
    */
   async triggerNFTUpdate() {
-    console.log('Manually triggering NFT count update...');
-    const startTime = new Date();
     
     try {
       const result = await nftService.updateAllUsersNFTCount();
-      const endTime = new Date();
-      const duration = endTime - startTime;
-      
-      console.log(`Manual NFT count update completed in ${duration}ms:`, {
-        success: result.success,
-        totalUsers: result.totalUsers,
-        updatedUsers: result.updatedUsers,
-        failedUsers: result.failedUsers,
-        unchangedUsers: result.unchangedUsers
-      });
-
       return result;
 
     } catch (error) {

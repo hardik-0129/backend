@@ -17,7 +17,6 @@ class NFTService {
   async fetchNFTCount(walletAddress) {
     try {
       if (!walletAddress || !this.isValidWalletAddress(walletAddress)) {
-        console.log(`Invalid wallet address: ${walletAddress}`);
         return 0;
       }
 
@@ -27,15 +26,12 @@ class NFTService {
         'https://apechain.drpc.org',
         'https://33139.rpc.thirdweb.com',
         'https://rpc.apechain.com'
-      ];
-
-      console.log(`Fetching Alpha Lion NFT count for ${walletAddress} from blockchain...`);
+      ];  
       
       // Get the balance using the same method as frontend
       const balanceHex = await this.ethCall(CONTRACT_ADDRESS, this.encodeBalanceOf(walletAddress));
       const nftCount = parseInt(this.hexToUintString(balanceHex));
 
-      console.log(`Fetched Alpha Lion NFT count for ${walletAddress}: ${nftCount}`);
       return nftCount;
 
     } catch (error) {
@@ -130,7 +126,6 @@ class NFTService {
       const walletAddress = user.alphaRole?.walletAddress;
       
       if (!walletAddress) {
-        console.log(`No wallet address found for user ${user._id}`);
         return {
           userId: user._id,
           success: false,
@@ -147,18 +142,15 @@ class NFTService {
       
       // Validate the new count is reasonable for Alpha Lion NFTs
       if (newNFTCount > 1000) {
-        console.log(`Warning: New NFT count (${newNFTCount}) is unreasonably high for Alpha Lion collection. Keeping old count (${oldNFTCount}).`);
         finalNFTCount = oldNFTCount;
       }
       // If old count is unreasonably high (likely from parsing error), always use new count
       else if (oldNFTCount > 1000) {
-        console.log(`Warning: Old NFT count (${oldNFTCount}) is unreasonably high, likely from parsing error. Using new blockchain count (${newNFTCount}).`);
         finalNFTCount = newNFTCount;
       }
       // If new count is significantly lower than old count, it might be a parsing error
       // Keep the old count if new count is less than 50% of old count and old count is reasonable
       else if (oldNFTCount > 10 && oldNFTCount <= 1000 && newNFTCount < (oldNFTCount * 0.5)) {
-        console.log(`Warning: New NFT count (${newNFTCount}) is significantly lower than old count (${oldNFTCount}). Keeping old count.`);
         finalNFTCount = oldNFTCount;
       }
 
@@ -178,7 +170,6 @@ class NFTService {
 
         await user.save();
 
-        console.log(`Updated NFT count for user ${user._id}: ${oldNFTCount} -> ${finalNFTCount}`);
         
         return {
           userId: user._id,
@@ -189,7 +180,6 @@ class NFTService {
           roleName: calculatedRole.roleName
         };
       } else {
-        console.log(`NFT count unchanged for user ${user._id}: ${oldNFTCount}`);
         return {
           userId: user._id,
           success: true,
@@ -215,7 +205,6 @@ class NFTService {
    */
   async updateAllUsersNFTCount() {
     try {
-      console.log('Starting NFT count update for all users...');
       
       // Find all users with wallet addresses
       const users = await User.find({
@@ -223,7 +212,6 @@ class NFTService {
       });
 
       if (users.length === 0) {
-        console.log('No users with wallet addresses found');
         return {
           success: true,
           message: 'No users with wallet addresses found',
@@ -234,7 +222,6 @@ class NFTService {
         };
       }
 
-      console.log(`Found ${users.length} users with wallet addresses`);
 
       const results = [];
       let updatedUsers = 0;
@@ -276,7 +263,6 @@ class NFTService {
         results
       };
 
-      console.log('NFT count update completed:', summary);
       return summary;
 
     } catch (error) {

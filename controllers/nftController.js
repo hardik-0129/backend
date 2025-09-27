@@ -10,7 +10,6 @@ const CONTRACT_ADDRESS = '0x8420B95bEac664b6E8E89978C3fDCaA1A71c8350';
  */
 exports.updateAllNFTCounts = async (req, res) => {
   try {
-    console.log('Manual NFT count update requested');
     
     const result = await cronScheduler.triggerNFTUpdate();
     
