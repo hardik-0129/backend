@@ -14,7 +14,16 @@ exports.forgotPasswordRequest = async (req, res) => {
     user.otp = otp;
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
     await user.save();
-    await sendOTP(email, otp);
+    // Get request information for OTP email
+    const request_ip = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || 'Unknown';
+    const request_device = req.headers['user-agent'] || 'Unknown Device';
+    
+    await sendOTP(email, otp, {
+      expiry_minutes: 10, // OTP expires in 10 minutes (as set above)
+      request_device,
+      request_ip,
+      support_email: process.env.SUPPORT_EMAIL || 'support@alphalions.io'
+    });
     res.json({ status: true, msg: 'OTP sent to your email.' });
   } catch (err) {
     res.status(500).json({ status: false, msg: 'Server error', error: err.message });

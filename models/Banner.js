@@ -16,6 +16,11 @@ const bannerSchema = new mongoose.Schema({
     required: false,
     default: ''
   },
+  buttonLink: {
+    type: String,
+    required: false,
+    default: ''
+  },
   backgroundImage: {
     type: String,
     required: true,
@@ -33,6 +38,7 @@ const bannerSchema = new mongoose.Schema({
     title: { type: String, default: '' },
     description: { type: String, default: '' },
     buttonText: { type: String, default: '' },
+    buttonLink: { type: String, default: '' },
     alt: {
       type: String,
       default: 'Banner Image'

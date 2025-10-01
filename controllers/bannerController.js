@@ -15,6 +15,7 @@ exports.getBanner = async (req, res) => {
         title: '',
         description: '',
         buttonText: '',
+        buttonLink: '',
         backgroundImage: '/assets/banner/banner.jpg',
         bannerImages: [],
         isActive: false
@@ -32,7 +33,7 @@ exports.getBanner = async (req, res) => {
 // Update banner (Admin only)
 exports.updateBanner = async (req, res) => {
   try {
-    const { title, description, buttonText, backgroundImage, bannerImages } = req.body;
+    const { title, description, buttonText, buttonLink, backgroundImage, bannerImages } = req.body;
 
     // Find existing active banner or create new one
     let banner = await Banner.findOne({ isActive: true });
@@ -42,6 +43,7 @@ exports.updateBanner = async (req, res) => {
       if (typeof title === 'string') banner.title = title;
       if (typeof description === 'string') banner.description = description;
       if (typeof buttonText === 'string') banner.buttonText = buttonText;
+      if (typeof buttonLink === 'string') banner.buttonLink = buttonLink;
       if (typeof backgroundImage === 'string' && backgroundImage) {
         banner.backgroundImage = backgroundImage;
       }
@@ -55,6 +57,7 @@ exports.updateBanner = async (req, res) => {
         title: typeof title === 'string' ? title : '',
         description: typeof description === 'string' ? description : '',
         buttonText: typeof buttonText === 'string' ? buttonText : '',
+        buttonLink: typeof buttonLink === 'string' ? buttonLink : '',
         backgroundImage: typeof backgroundImage === 'string' && backgroundImage ? backgroundImage : '/assets/banner/banner.jpg',
         bannerImages: bannerImages || [],
         isActive: true
@@ -141,17 +144,19 @@ exports.uploadBannerImage = async (req, res) => {
     }
 
     // If metadata provided in multipart body, update banner text fields
-    const { title, description, buttonText } = req.body || {};
+    const { title, description, buttonText, buttonLink } = req.body || {};
     if (typeof title === 'string') banner.title = title;
     if (typeof description === 'string') banner.description = description;
     if (typeof buttonText === 'string') banner.buttonText = buttonText;
+    if (typeof buttonLink === 'string') banner.buttonLink = buttonLink;
 
     // Also push image with per-image metadata into imageGallery
     banner.imageGallery.push({
       url: imagePath,
       title: typeof title === 'string' ? title : '',
       description: typeof description === 'string' ? description : '',
-      buttonText: typeof buttonText === 'string' ? buttonText : ''
+      buttonText: typeof buttonText === 'string' ? buttonText : '',
+      buttonLink: typeof buttonLink === 'string' ? buttonLink : ''
     });
 
     // Add new image to the bannerImages array
@@ -405,11 +410,15 @@ exports.removeImageFromBanner = async (req, res) => {
     }
 
     // Remove the image from bannerImages array
-    const initialLength = banner.bannerImages.length;
+    const initialBannerImagesLength = banner.bannerImages.length;
     banner.bannerImages = banner.bannerImages.filter(img => img !== imagePath);
     
-    if (banner.bannerImages.length === initialLength) {
-      return res.status(404).json({ msg: 'Image not found in banner images' });
+    // Also remove from imageGallery array
+    const initialImageGalleryLength = banner.imageGallery.length;
+    banner.imageGallery = banner.imageGallery.filter(galleryItem => galleryItem.url !== imagePath);
+    
+    if (banner.bannerImages.length === initialBannerImagesLength && banner.imageGallery.length === initialImageGalleryLength) {
+      return res.status(404).json({ msg: 'Image not found in banner images or gallery' });
     }
 
     banner.updatedAt = Date.now();

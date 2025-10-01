@@ -31,7 +31,8 @@ const convertGameTypeToFullUrls = (gameType) => {
   
   return {
     ...gameTypeObj,
-    image: getFullImageUrl(gameTypeObj.image)
+    image: getFullImageUrl(gameTypeObj.image),
+    mobileBannerImage: getFullImageUrl(gameTypeObj.mobileBannerImage)
   };
 };
 
@@ -507,15 +508,25 @@ exports.createGameType = async (req, res) => {
     
     // Determine the image path - either from uploaded file or from request body
     let imagePath;
-    if (req.file) {
+    if (req.files && req.files.image && req.files.image[0]) {
       // If a file was uploaded, use the file path
-      imagePath = `/uploads/gametypes/${req.file.filename}`;
+      imagePath = `/uploads/gametypes/${req.files.image[0].filename}`;
     } else if (req.body.image) {
       // If no file was uploaded, check if an image path was provided in the request body
       imagePath = req.body.image;
     } else {
       // If no image was provided at all, use a default image path
       imagePath = '/uploads/gametypes/default-gametype.png';
+    }
+
+    // Handle mobile banner image
+    let mobileBannerImagePath;
+    if (req.files && req.files.mobileBannerImage && req.files.mobileBannerImage[0]) {
+      mobileBannerImagePath = `/uploads/gametypes/${req.files.mobileBannerImage[0].filename}`;
+    } else if (req.body.mobileBannerImage) {
+      mobileBannerImagePath = req.body.mobileBannerImage;
+    } else {
+      mobileBannerImagePath = '';
     }
     
     // Parse subCategory - it might be a JSON string for multiple values
@@ -534,7 +545,8 @@ exports.createGameType = async (req, res) => {
     const newGameType = new GameType({
       gameType: gameType.trim(),
       subCategory: parsedSubCategory,
-      image: imagePath
+      image: imagePath,
+      mobileBannerImage: mobileBannerImagePath
     });
     
     await newGameType.save();
@@ -689,12 +701,21 @@ exports.updateGameType = async (req, res) => {
     }
     
     // Update image if a new file was uploaded or image path was provided
-    if (req.file) {
+    if (req.files && req.files.image && req.files.image[0]) {
       // If a file was uploaded, use the file path
-      updateData.image = `/uploads/gametypes/${req.file.filename}`;
+      updateData.image = `/uploads/gametypes/${req.files.image[0].filename}`;
     } else if (req.body.image) {
       // If no file was uploaded, check if an image path was provided in the request body
       updateData.image = req.body.image;
+    }
+    
+    // Update mobile banner image if a new file was uploaded or image path was provided
+    if (req.files && req.files.mobileBannerImage && req.files.mobileBannerImage[0]) {
+      // If a file was uploaded, use the file path
+      updateData.mobileBannerImage = `/uploads/gametypes/${req.files.mobileBannerImage[0].filename}`;
+    } else if (req.body.mobileBannerImage) {
+      // If no file was uploaded, check if an image path was provided in the request body
+      updateData.mobileBannerImage = req.body.mobileBannerImage;
     }
     
     // Update the game type

@@ -10,6 +10,10 @@ const gameTypeSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  mobileBannerImage: {
+    type: String,
+    required: false
+  },
   isActive: {
     type: Boolean,
     default: true

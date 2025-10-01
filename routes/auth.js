@@ -224,7 +224,16 @@ router.post('/login', async (req, res) => {
       user.otp = otp;
       user.otpExpires = expires;
       await user.save();
-      await sendOTP(email, otp);
+      // Get request information for OTP email
+      const request_ip = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || 'Unknown';
+      const request_device = req.headers['user-agent'] || 'Unknown Device';
+      
+      await sendOTP(email, otp, {
+        expiry_minutes: 1, // OTP expires in 1 minute (60 seconds as set above)
+        request_device,
+        request_ip,
+        support_email: process.env.SUPPORT_EMAIL || 'support@alphalions.io'
+      });
       return res.json({ status: true, message: 'OTP sent to email', otpRequired: true, method: 'email' });
     } else if (user.totpEnabled && user.twoFactorType === 'totp' && user.totpSecret) {
       // Challenge with TOTP
@@ -333,6 +342,7 @@ router.put('/2fa/totp/disable', userAuth, async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ status: false, message: 'User not found' });
     user.totpEnabled = false; // keep secret so user can enable later without re-setup
+    user.totpVerified = false; // clear verification status
     if (user.twoFactorType === 'totp') user.twoFactorType = 'none';
     await user.save();
     return res.json({ status: true, message: 'TOTP disabled' });

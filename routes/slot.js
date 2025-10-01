@@ -82,57 +82,98 @@ const gameModeUpload = multer({
 
 // Compression middleware for game type images
 const compressGameTypeImage = async (req, res, next) => {
-  if (!req.file) {
+  if (!req.files || (!req.files.image && !req.files.mobileBannerImage)) {
     return next();
   }
 
   try {
-    // Validate the image
-    const validation = validateImage(req.file);
-    if (!validation.valid) {
-      return res.status(400).json({
-        status: false,
-        msg: validation.error
-      });
+    // Process main image if provided
+    if (req.files.image && req.files.image[0]) {
+      const imageFile = req.files.image[0];
+      
+      // Validate the image
+      const validation = validateImage(imageFile);
+      if (!validation.valid) {
+        return res.status(400).json({
+          status: false,
+          msg: validation.error
+        });
+      }
+
+      // Generate unique filename
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const filename = `gametype-${uniqueSuffix}.jpg`;
+      const outputPath = path.join(uploadsDir, filename);
+
+      // Compress the image
+      const compressionResult = await sharp(imageFile.buffer)
+        .resize(400, 400, {
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .jpeg({
+          quality: 80,
+          progressive: true,
+          mozjpeg: true
+        })
+        .toFile(outputPath);
+
+      if (!compressionResult) {
+        return res.status(500).json({
+          status: false,
+          msg: 'Failed to compress image'
+        });
+      }
+
+      // Update the file object
+      imageFile.filename = filename;
+      imageFile.path = outputPath;
+      imageFile.size = fs.statSync(outputPath).size;
     }
 
-    // Generate unique filename
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const filename = `gametype-${uniqueSuffix}.jpg`;
-    const outputPath = path.join(uploadsDir, filename);
+    // Process mobile banner image if provided
+    if (req.files.mobileBannerImage && req.files.mobileBannerImage[0]) {
+      const mobileBannerFile = req.files.mobileBannerImage[0];
+      
+      // Validate the image
+      const validation = validateImage(mobileBannerFile);
+      if (!validation.valid) {
+        return res.status(400).json({
+          status: false,
+          msg: validation.error
+        });
+      }
 
-    // Compress the image
-    const compressionResult = await sharp(req.file.buffer)
-      .resize(400, 400, {
-        fit: 'inside',
-        withoutEnlargement: true
-      })
-      .jpeg({
-        quality: 80,
-        progressive: true,
-        mozjpeg: true
-      })
-      .toFile(outputPath);
+      // Generate unique filename
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const filename = `mobile-banner-${uniqueSuffix}.jpg`;
+      const outputPath = path.join(uploadsDir, filename);
 
-    if (!compressionResult) {
-      return res.status(500).json({
-        status: false,
-        msg: 'Failed to compress image'
-      });
+      // Compress the image
+      const compressionResult = await sharp(mobileBannerFile.buffer)
+        .resize(400, 400, {
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .jpeg({
+          quality: 80,
+          progressive: true,
+          mozjpeg: true
+        })
+        .toFile(outputPath);
+
+      if (!compressionResult) {
+        return res.status(500).json({
+          status: false,
+          msg: 'Failed to compress mobile banner image'
+        });
+      }
+
+      // Update the file object
+      mobileBannerFile.filename = filename;
+      mobileBannerFile.path = outputPath;
+      mobileBannerFile.size = fs.statSync(outputPath).size;
     }
-
-    // Get file info for logging
-    const stats = fs.statSync(outputPath);
-    const fileSizeKB = Math.round(stats.size / 1024);
-    const fileSizeMB = Math.round((stats.size / (1024 * 1024)) * 100) / 100;
-    const originalSizeKB = Math.round(req.file.size / 1024);
-    const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
-    const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
-
-    // Update req.file to match the compressed file
-    req.file.filename = filename;
-    req.file.path = outputPath;
-    req.file.size = stats.size;
 
     next();
   } catch (error) {
@@ -237,7 +278,10 @@ router.delete('/slots/:id', authentication, deleteSlot);
 router.get('/gametypes', getAllGameTypes);
 
 // POST /api/admin/gametypes - Create new game type
-router.post('/gametypes', authentication, upload.single('image'), compressGameTypeImage, (req, res, next) => {
+router.post('/gametypes', authentication, upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'mobileBannerImage', maxCount: 1 }
+]), compressGameTypeImage, (req, res, next) => {
   // Validate that gameType is provided
   if (!req.body.gameType) {
     return res.status(400).json({
@@ -255,7 +299,10 @@ router.post('/gametypes', authentication, upload.single('image'), compressGameTy
 router.delete('/gametypes/:id', authentication, deleteGameType);
 
 // PUT /api/admin/gametypes/:id - Update a game type
-router.put('/gametypes/:id', authentication, upload.single('image'), compressGameTypeImage, (req, res, next) => {
+router.put('/gametypes/:id', authentication, upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'mobileBannerImage', maxCount: 1 }
+]), compressGameTypeImage, (req, res, next) => {
   // Validate that gameType is provided
   if (!req.body.gameType) {
     return res.status(400).json({
