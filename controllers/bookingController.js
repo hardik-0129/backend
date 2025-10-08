@@ -142,8 +142,9 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Find user
-    const user = await User.findById(req.user.userId);
+    // Find user - support different token payload shapes or fallback to body
+    const userIdFromToken = (req.user && (req.user.userId || req.user.id)) || userId;
+    const user = await User.findById(userIdFromToken);
     if (!user) {
       return res.status(404).json({ msg: "User not found" });
     }
@@ -165,9 +166,9 @@ exports.createBooking = async (req, res) => {
       0
     );
 
-    // For Free Matches, entry fee should be 0
-    const isFreeMachatch = slotType.toLowerCase() === "free matches";
-    const expectedAmount = isFreeMachatch ? 0 : slot.entryFee * positionsCount;
+    // Free match when entryFee is 0 (or less) OR explicitly flagged as "free matches"
+    const isFreeMachatch = (Number(slot.entryFee) <= 0) || (String(slotType || '').toLowerCase() === "free matches");
+    const expectedAmount = isFreeMachatch ? 0 : Number(slot.entryFee || 0) * positionsCount;
 
     if (Math.abs(totalAmount - expectedAmount) > 0.01) {
       return res.status(400).json({

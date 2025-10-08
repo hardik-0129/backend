@@ -129,28 +129,40 @@ exports.uploadBannerImage = async (req, res) => {
     const imagePath = `/uploads/banners/${filename}`;
     const fullImageUrl = getFullImageUrl(imagePath);
     
-    // Find the active banner or create one if none exists
-    let banner = await Banner.findOne({ isActive: true });
-    
-    if (!banner) {
-      // Create a new banner shell without default text
-      banner = new Banner({
-        title: '',
-        description: '',
-        buttonText: '',
-        bannerImages: [],
-        isActive: true
+    // Heuristic: if banner metadata is present, treat as hero banner upload; else treat as generic (e.g., match) upload
+    const { title, description, buttonText, buttonLink } = req.body || {};
+    const hasHeroMetadata = [title, description, buttonText, buttonLink].some(v => typeof v === 'string' && v.length > 0);
+
+    if (!hasHeroMetadata) {
+      // Generic upload (match/slot or other) – do NOT modify Banner collection
+      return res.json({
+        msg: 'Image uploaded successfully',
+        imagePath: fullImageUrl,
+        relativePath: imagePath,
+        compression: {
+          originalSize: { kb: originalSizeKB, mb: originalSizeMB },
+          compressedSize: { kb: fileSizeKB, mb: fileSizeMB },
+          compressionRatio: compressionRatio,
+          spaceSaved: {
+            kb: originalSizeKB - fileSizeKB,
+            mb: Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100
+          },
+          format: 'JPEG'
+        }
       });
     }
 
-    // If metadata provided in multipart body, update banner text fields
-    const { title, description, buttonText, buttonLink } = req.body || {};
+    // Hero banner upload – update active banner document
+    let banner = await Banner.findOne({ isActive: true });
+    if (!banner) {
+      banner = new Banner({ title: '', description: '', buttonText: '', bannerImages: [], isActive: true });
+    }
+
     if (typeof title === 'string') banner.title = title;
     if (typeof description === 'string') banner.description = description;
     if (typeof buttonText === 'string') banner.buttonText = buttonText;
     if (typeof buttonLink === 'string') banner.buttonLink = buttonLink;
 
-    // Also push image with per-image metadata into imageGallery
     banner.imageGallery.push({
       url: imagePath,
       title: typeof title === 'string' ? title : '',
@@ -159,13 +171,10 @@ exports.uploadBannerImage = async (req, res) => {
       buttonLink: typeof buttonLink === 'string' ? buttonLink : ''
     });
 
-    // Add new image to the bannerImages array
     banner.bannerImages.push(imagePath);
     banner.updatedAt = Date.now();
-    
     await banner.save();
 
-    // Convert to full URLs before sending response
     const bannerWithFullUrls = convertBannerToFullUrls(banner);
     
     res.json({
@@ -175,14 +184,8 @@ exports.uploadBannerImage = async (req, res) => {
       banner: bannerWithFullUrls,
       totalBannerImages: banner.bannerImages.length,
       compression: {
-        originalSize: {
-          kb: originalSizeKB,
-          mb: originalSizeMB
-        },
-        compressedSize: {
-          kb: fileSizeKB,
-          mb: fileSizeMB
-        },
+        originalSize: { kb: originalSizeKB, mb: originalSizeMB },
+        compressedSize: { kb: fileSizeKB, mb: fileSizeMB },
         compressionRatio: compressionRatio,
         spaceSaved: {
           kb: originalSizeKB - fileSizeKB,
@@ -194,6 +197,91 @@ exports.uploadBannerImage = async (req, res) => {
   } catch (error) {
     console.error('Error uploading banner image:', error);
     res.status(500).json({ msg: 'Server error while uploading image' });
+  }
+};
+
+// Upload a single image explicitly for the hero banner (Admin only)
+// Always adds the image to the active Banner (no metadata required)
+exports.uploadHeroSingleImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ msg: 'No image file uploaded' });
+    }
+
+    // Validate the image
+    const validation = validateImage(req.file);
+    if (!validation.valid) {
+      return res.status(400).json({ msg: validation.error });
+    }
+
+    // Generate unique filename under banners
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const originalExt = path.extname(req.file.originalname);
+    const filename = `banner-${uniqueSuffix}${originalExt}`;
+    const outputPath = path.join(__dirname, '../uploads/banners', filename);
+
+    // Compress the image
+    const compressionResult = await sharp(req.file.buffer)
+      .resize(1920, 1080, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80, progressive: true, mozjpeg: true })
+      .toFile(outputPath);
+
+    if (!compressionResult) {
+      return res.status(500).json({ msg: 'Failed to compress image' });
+    }
+
+    // File stats
+    const stats = fs.statSync(outputPath);
+    const fileSizeKB = Math.round(stats.size / 1024);
+    const fileSizeMB = Math.round((stats.size / (1024 * 1024)) * 100) / 100;
+    const originalSizeKB = Math.round(req.file.size / 1024);
+    const originalSizeMB = Math.round((req.file.size / (1024 * 1024)) * 100) / 100;
+    const compressionRatio = Math.round(((originalSizeKB - fileSizeKB) / originalSizeKB) * 100);
+
+    const imagePath = `/uploads/banners/${filename}`;
+    const fullImageUrl = getFullImageUrl(imagePath);
+
+    // Ensure there is an active banner
+    let banner = await Banner.findOne({ isActive: true });
+    if (!banner) {
+      banner = new Banner({ title: '', description: '', buttonText: '', bannerImages: [], isActive: true });
+    }
+
+    // Optional metadata if supplied, else store empty strings
+    const { title, description, buttonText, buttonLink } = req.body || {};
+
+    banner.imageGallery.push({
+      url: imagePath,
+      title: typeof title === 'string' ? title : '',
+      description: typeof description === 'string' ? description : '',
+      buttonText: typeof buttonText === 'string' ? buttonText : '',
+      buttonLink: typeof buttonLink === 'string' ? buttonLink : ''
+    });
+    banner.bannerImages.push(imagePath);
+    banner.updatedAt = Date.now();
+    await banner.save();
+
+    const bannerWithFullUrls = convertBannerToFullUrls(banner);
+    return res.json({
+      msg: 'Hero banner image uploaded successfully',
+      imagePath: fullImageUrl,
+      relativePath: imagePath,
+      banner: bannerWithFullUrls,
+      totalBannerImages: banner.bannerImages.length,
+      compression: {
+        originalSize: { kb: originalSizeKB, mb: originalSizeMB },
+        compressedSize: { kb: fileSizeKB, mb: fileSizeMB },
+        compressionRatio: compressionRatio,
+        spaceSaved: {
+          kb: originalSizeKB - fileSizeKB,
+          mb: Math.round(((originalSizeMB - fileSizeMB) * 100)) / 100
+        },
+        format: 'JPEG'
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading hero banner image:', error);
+    res.status(500).json({ msg: 'Server error while uploading hero banner image' });
   }
 };
 

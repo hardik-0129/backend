@@ -9,6 +9,12 @@ const authentication = require('../middleware/adminAuth');
 // Get all users
 router.get('/users', authentication, adminController.getAllUsers);
 
+// Create new user (admin only)
+router.post('/users', authentication, adminController.createUser);
+
+// Delete user (admin only)
+router.delete('/users/:userId', authentication, adminController.deleteUser);
+
 // Get all slot bookings
 router.get('/slot-bookings', authentication, adminController.getAllSlotBookings);
 

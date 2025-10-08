@@ -36,5 +36,7 @@ router.get('/admin/approved-withdrawals', authentication, walletController.getAp
 router.get('/admin/rejected-withdrawals', authentication, walletController.getRejectedWithdrawals);
 router.post('/admin/approve-withdrawal/:transactionId', authentication, walletController.approveWithdrawal);
 router.post('/admin/reject-withdrawal/:transactionId', authentication, walletController.rejectWithdrawal);
+router.get('/admin/all-transactions', authentication, walletController.getAllTransactions);
+router.get('/admin/transaction-history', authentication, walletController.getTransactionHistoryAdmin);
 
 module.exports = router;

@@ -40,6 +40,8 @@ router.get('/', bannerController.getBanner);
 router.get('/admin/banners', bannerController.getAllBanners);
 router.put('/admin/update', authentication, bannerController.updateBanner);
 router.post('/admin/upload-image', authentication, upload.single('banner'), bannerController.uploadBannerImage);
+// Explicit hero single-image upload (always adds to hero banner)
+router.post('/admin/upload-hero', authentication, upload.single('banner'), bannerController.uploadHeroSingleImage);
 router.post('/admin/upload-multiple', authentication, upload.array('bannerImages', 10), bannerController.uploadMultipleBannerImages);
 router.post('/admin/:bannerId/add-images', authentication, bannerController.addImagesToBanner);
 router.delete('/admin/:bannerId/remove-image', authentication, bannerController.removeImageFromBanner);

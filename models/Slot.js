@@ -57,10 +57,6 @@ const slotSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  matchDescription: {
-    type: String,
-    default: ''
-  },
   mapName: {
     type: String,
     default: 'Bermuda'
@@ -78,10 +74,6 @@ const slotSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  registrationDeadline: {
-    type: Date,
-    default: Date.now
-  },
   rules: {
     type: String,
     default: 'Standard Free Fire rules apply'
@@ -90,23 +82,11 @@ const slotSchema = new mongoose.Schema({
     type: String,
     default: 'Winner takes all'
   },
-  contactInfo: {
-    type: String,
-    default: ''
-  },
   streamLink: {
     type: String,
     default: ''
   },
   discordLink: {
-    type: String,
-    default: ''
-  },
-  specialRules: {
-    type: String,
-    default: ''
-  },
-  banList: {
     type: String,
     default: ''
   },

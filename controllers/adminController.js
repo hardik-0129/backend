@@ -93,6 +93,153 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
+// Create new user (admin only)
+exports.createUser = async (req, res) => {
+  try {
+    const { name, email, phone, password, freeFireUsername, wallet, isAdmin } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !phone || !password || !freeFireUsername) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Name, email, phone, password, and Free Fire username are required' 
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ 
+      $or: [
+        { email: email.toLowerCase() },
+        { phone: phone },
+        { freeFireUsername: freeFireUsername }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User with this email, phone, or Free Fire username already exists' 
+      });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Generate referral code
+    const generateReferralCode = () => {
+      const prefix = 'Alpha';
+      const randomNum = Math.floor(Math.random() * 9000) + 1000; // 4-digit number
+      return `${prefix}${randomNum}`;
+    };
+
+    let referralCode = generateReferralCode();
+    
+    // Ensure referral code is unique
+    while (await User.findOne({ referCode: referralCode })) {
+      referralCode = generateReferralCode();
+    }
+
+    // Create new user
+    const newUser = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+      password: hashedPassword,
+      freeFireUsername: freeFireUsername.trim(),
+      wallet: parseFloat(wallet) || 0,
+      isAdmin: isAdmin || false,
+      referCode: referralCode,
+      isVerified: true, // Admin-created users are automatically verified
+      createdAt: new Date()
+    });
+
+    await newUser.save();
+
+    // Remove password from response
+    const userResponse = {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      phone: newUser.phone,
+      freeFireUsername: newUser.freeFireUsername,
+      wallet: newUser.wallet,
+      isAdmin: newUser.isAdmin,
+      referCode: newUser.referCode,
+      isVerified: newUser.isVerified,
+      createdAt: newUser.createdAt
+    };
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      user: userResponse
+    });
+
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Server error. Please try again later.',
+      details: error.message 
+    });
+  }
+};
+
+// Delete user (admin only)
+exports.deleteUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID is required' 
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
+    }
+
+    // Prevent deletion of admin users
+    if (user.isAdmin) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Cannot delete admin users' 
+      });
+    }
+
+    // Delete all related bookings first
+    await Booking.deleteMany({ user: userId });
+
+    // Delete all related transactions
+    const Transaction = require('../models/Transaction');
+    await Transaction.deleteMany({ userId: userId });
+
+    // Delete the user
+    await User.findByIdAndDelete(userId);
+
+    res.status(200).json({
+      success: true,
+      message: 'User and all related data deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Server error. Please try again later.',
+      details: error.message 
+    });
+  }
+};
+
 // Get all slot bookings with user details
 exports.getAllSlotBookings = async (req, res) => {
   try {

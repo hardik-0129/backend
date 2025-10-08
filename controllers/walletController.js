@@ -71,11 +71,12 @@ exports.checkOrderStatus = async (req, res) => {
 
 exports.tranzupiWebhook = async (req, res) => {
   try {
+    console.log(req.body);
     const body = req.body || {};
     const orderId = body.order_id || body.orderId || body.transaction_id || body.txn_id;
     const amount = parseFloat(body.amount || body.txn_amount || 0);
     const remark1 = body.remark1 || body.meta || '';
-
+console.log(orderId, amount, remark1);
     if (!orderId || !amount) {
       return res.status(400).json({ success: false, error: 'order_id/transaction_id and amount are required' });
     }
@@ -306,11 +307,22 @@ exports.getBalance = async (req, res) => {
     // Withdrawable earnings = winnings - payouts (cannot be negative)
     const withdrawableEarnings = Math.max(0, (totalWins || 0) - (totalPayouts || 0));
 
+    // Subtract PENDING withdrawals (hold) to show reduced earnings while pending
+    const pendingAgg = await Transaction.aggregate([
+      { $match: { userId: user._id, type: 'WITHDRAW', status: 'PENDING_ADMIN_APPROVAL' } },
+      { $group: { _id: null, total: { $sum: { $convert: { input: '$amount', to: 'double', onError: 0, onNull: 0 } } } } }
+    ]);
+    const pendingWithdrawals = pendingAgg[0]?.total || 0;
+    const earningsAfterHold = Math.max(0, withdrawableEarnings - pendingWithdrawals);
+    const balanceWithoutHolds = Math.max(0, (parseFloat(user.wallet) || 0) - (parseFloat(pendingWithdrawals) || 0));
+
     res.json({ 
       status: true,
       balance: user.wallet,
-      totalEarnings: withdrawableEarnings,
-      totalPayouts
+      balanceWithoutHolds,
+      totalEarnings: earningsAfterHold,
+      totalPayouts,
+      pendingWithdrawals
     });
   } catch (err) {
     console.error('Get Balance Error:', err);
@@ -409,12 +421,52 @@ exports.tranzupiWithdraw = async (req, res) => {
       });
     }
 
-    // Check if user has sufficient balance
-    if (user.wallet < parseFloat(amount)) {
+    // Calculate withdrawable earnings (winnings only - previous payouts)
+    let earningBalance = 0;
+    try {
+      const winAgg = await require('../models/Winner').aggregate([
+        { $match: { userId: user._id } },
+        { $group: { _id: null, total: { $sum: '$winningPrice' } } }
+      ]);
+      const totalWinsFromWinners = winAgg[0]?.total || 0;
+
+      const winAggTx = await Transaction.aggregate([
+        { $match: {
+            userId: user._id,
+            status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] },
+            $or: [
+              { type: 'WIN' },
+              { type: 'CREDIT', description: { $regex: /(winning|win\s+credited)/i } },
+              { type: 'CREDIT', 'metadata.category': 'WIN' }
+            ]
+          }
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const totalWinsFromTx = winAggTx[0]?.total || 0;
+
+      const payoutsAgg = await Transaction.aggregate([
+        { $match: { userId: user._id, type: { $in: ['DEBIT', 'WITHDRAW'] }, status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const totalPayouts = payoutsAgg[0]?.total || 0;
+
+      earningBalance = Math.max(0, (totalWinsFromWinners + totalWinsFromTx) - totalPayouts);
+    } catch (_) {
+      earningBalance = 0;
+    }
+
+    // Enforce earnings-only withdrawal
+    if (parseFloat(amount) > earningBalance) {
       return res.status(400).json({ 
         success: false,
-        error: 'Insufficient wallet balance' 
+        error: 'You can withdraw only from your winnings balance.'
       });
+    }
+
+    // Also ensure overall wallet has funds (should normally be true if earnings tracked correctly)
+    if (user.wallet < parseFloat(amount)) {
+      return res.status(400).json({ success: false, error: 'Insufficient wallet balance' });
     }
 
     // Check if TranzUPI is properly configured
@@ -490,26 +542,14 @@ exports.tranzupiWithdraw = async (req, res) => {
     });
 
     if (response.data.success) {
-      // Deduct amount from user wallet immediately (pending confirmation)
-      user.wallet -= parseFloat(amount);
-      await user.save();
-
-      // Emit wallet update via socket.io
-      try {
-        const { emitWalletUpdate } = require('../websocket');
-        emitWalletUpdate(user._id.toString(), user.wallet);
-      } catch (e) {
-        console.error('Socket emit error:', e);
-      }
-
-      // Removed old 5% referral on withdrawal. Referral program now uses fixed coin rewards.
-      res.json({
+      // Do NOT deduct wallet on request; keep PENDING for admin to approve/reject
+      return res.json({
         success: true,
-        message: 'Withdrawal request submitted successfully',
+        message: 'Withdrawal request submitted successfully. It will be processed after admin approval.',
         transaction_id: transactionId,
         amount: parseFloat(amount),
-        remaining_balance: user.wallet,
-        status: 'pending'
+        status: 'PENDING_ADMIN_APPROVAL',
+        requires_approval: true
       });
     } else {
       res.status(400).json({
@@ -791,7 +831,7 @@ exports.approveWithdrawal = async (req, res) => {
       });
     }
 
-    // Process the withdrawal (deduct from overall wallet, earnings already enforced above)
+    // Process the withdrawal: deduct once on approval
     user.wallet -= transaction.amount;
     await user.save();
 
@@ -1040,6 +1080,356 @@ exports.getReferralEarnings = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch referral earnings',
+      details: err.message
+    });
+  }
+};
+
+// Get all transactions for admin panel
+exports.getAllTransactions = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      search = '', 
+      status = 'all', 
+      type = 'all',
+      dateFilter = 'all',
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    // Build query
+    let query = {};
+    
+    // Search filter
+    if (search) {
+      query.$or = [
+        { transactionId: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Status filter
+    if (status !== 'all') {
+      query.status = status;
+    }
+    
+    // Type filter
+    if (type !== 'all') {
+      query.type = type;
+    }
+    
+    // Date filter
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      let startDate;
+      
+      switch (dateFilter) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          startDate = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          startDate = null;
+      }
+      
+      if (startDate) {
+        query.createdAt = { $gte: startDate };
+      }
+    }
+
+    // Sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get transactions with user details
+    const transactions = await Transaction.find(query)
+      .populate('userId', 'name email phone freeFireUsername')
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Get total count for pagination
+    const totalTransactions = await Transaction.countDocuments(query);
+
+    // Calculate summary statistics
+    const summaryStats = await Transaction.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalTransactions: { $sum: 1 },
+          totalDeposits: {
+            $sum: {
+              $cond: [
+                { $in: ['$type', ['CREDIT', 'DEPOSIT']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalWithdrawals: {
+            $sum: {
+              $cond: [
+                { $in: ['$type', ['DEBIT', 'WITHDRAW']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          pendingTransactions: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'PENDING_ADMIN_APPROVAL'] },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const stats = summaryStats[0] || {
+      totalTransactions: 0,
+      totalDeposits: 0,
+      totalWithdrawals: 0,
+      pendingTransactions: 0
+    };
+
+    res.status(200).json({
+      success: true,
+      transactions,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalTransactions / parseInt(limit)),
+        totalTransactions,
+        hasNextPage: skip + parseInt(limit) < totalTransactions,
+        hasPrevPage: parseInt(page) > 1
+      },
+      stats
+    });
+
+  } catch (err) {
+    console.error('Get All Transactions Error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch all transactions',
+      details: err.message
+    });
+  }
+};
+
+// Get transaction history for admin panel with enhanced features
+exports.getTransactionHistoryAdmin = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      search = '', 
+      status = 'all', 
+      type = 'all',
+      dateFilter = 'all',
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      userId = null
+    } = req.query;
+
+    // Build query
+    let query = {};
+    
+    // User filter (if specific user requested)
+    if (userId) {
+      query.userId = userId;
+    }
+    
+    // Search filter
+    if (search) {
+      query.$or = [
+        { transactionId: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Status filter
+    if (status !== 'all') {
+      query.status = status;
+    }
+    
+    // Type filter
+    if (type !== 'all') {
+      query.type = type;
+    }
+    
+    // Date filter
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      let startDate;
+      
+      switch (dateFilter) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          startDate = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          startDate = null;
+      }
+      
+      if (startDate) {
+        query.createdAt = { $gte: startDate };
+      }
+    }
+
+    // Sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get transactions with user details
+    const transactions = await Transaction.find(query)
+      .populate('userId', 'name email phone freeFireUsername wallet')
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Get total count for pagination
+    const totalTransactions = await Transaction.countDocuments(query);
+
+    // Calculate detailed statistics
+    const summaryStats = await Transaction.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalTransactions: { $sum: 1 },
+          totalDeposits: {
+            $sum: {
+              $cond: [
+                { $in: ['$type', ['CREDIT', 'DEPOSIT']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalWithdrawals: {
+            $sum: {
+              $cond: [
+                { $in: ['$type', ['DEBIT', 'WITHDRAW']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalMatchEntries: {
+            $sum: {
+              $cond: [
+                { $eq: ['$type', 'MATCH_ENTRY'] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalPrizes: {
+            $sum: {
+              $cond: [
+                { $eq: ['$type', 'WIN'] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          pendingTransactions: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'PENDING_ADMIN_APPROVAL'] },
+                1,
+                0
+              ]
+            }
+          },
+          completedTransactions: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', ['SUCCESS', 'ADMIN_APPROVED']] },
+                1,
+                0
+              ]
+            }
+          },
+          failedTransactions: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'FAILED'] },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const stats = summaryStats[0] || {
+      totalTransactions: 0,
+      totalDeposits: 0,
+      totalWithdrawals: 0,
+      totalMatchEntries: 0,
+      totalPrizes: 0,
+      pendingTransactions: 0,
+      completedTransactions: 0,
+      failedTransactions: 0
+    };
+
+    // Get recent activity (last 10 transactions)
+    const recentActivity = await Transaction.find({})
+      .populate('userId', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      transactions,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalTransactions / parseInt(limit)),
+        totalTransactions,
+        hasNextPage: skip + parseInt(limit) < totalTransactions,
+        hasPrevPage: parseInt(page) > 1
+      },
+      stats,
+      recentActivity
+    });
+
+  } catch (err) {
+    console.error('Get Transaction History Admin Error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch transaction history',
       details: err.message
     });
   }

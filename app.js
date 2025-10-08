@@ -12,18 +12,22 @@ const slotRoutes = require('./routes/slot');
 const bannerRoutes = require('./routes/banner');
 const winnerRoutes = require('./routes/winner');
 const notificationRoutes = require('./routes/notification');
+const announcementRoutes = require('./routes/announcement');
 const nftRoutes = require('./routes/nft');
+const apkRoutes = require('./routes/apk');
+const blogRoutes = require('./routes/blogRoutes');
 const { startCronJobs } = require('./services/cronJobs');
 const cronScheduler = require('./services/cronScheduler');
 
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://192.168.1.7:8080', "https://esports.alphalions.io"],
+  origin: ['http://localhost:8080', 'http://192.168.1.6:8080', "https://esports.alphalions.io"],
   credentials: true
 }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Increase body limits to accommodate larger payloads (metadata, base64, etc.)
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 connectDB();
 startCronJobs();
@@ -41,7 +45,10 @@ app.use('/api/banner', bannerRoutes);
 app.use('/api/v1', slotRoutes); 
 app.use('/api/winners', winnerRoutes);
 app.use('/api/notification', notificationRoutes);
+app.use('/api/announcement', announcementRoutes);
 app.use('/api/nft', nftRoutes);
+app.use('/api/apk', apkRoutes);
+app.use('/api/admin/blogs', blogRoutes);
 app.use('/uploads', express.static('uploads'));
 
 app.use((err, req, res, next) => {

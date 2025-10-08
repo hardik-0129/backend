@@ -70,19 +70,14 @@ exports.createSlot = async (req, res) => {
     maxBookings,
     remainingBookings,
     matchTitle,
-    matchDescription = '',
     mapName = 'Bermuda',
     gameMode = 'Classic',
     tournamentName = '#ALPHALIONS',
     maxPlayers,
-    registrationDeadline,
     rules = 'Standard Free Fire rules apply',
     prizeDistribution = 'Winner takes all',
-    contactInfo = '',
     streamLink = '',
     discordLink = '',
-    specialRules = '',
-    banList = '',
     bannerImage = ''
   } = req.body;
 
@@ -138,19 +133,14 @@ exports.createSlot = async (req, res) => {
       thirdwin: req.body.thirdwin || 0,
       // Enhanced match information (all optional)
       matchTitle: matchTitle ? matchTitle.trim() : '',
-      matchDescription,
       mapName,
       gameMode,
       tournamentName,
       maxPlayers: maxPlayers || 0,
-      registrationDeadline: registrationDeadline || new Date(),
       rules,
       prizeDistribution,
-      contactInfo,
       streamLink,
       discordLink,
-      specialRules,
-      banList,
       bannerImage: bannerImage ? bannerImage.trim() : ''
     });
 
@@ -194,9 +184,8 @@ exports.updateSlot = async (req, res) => {
     const allowedFields = [
       'slotType', 'entryFee', 'matchTime', 'customStartInMinutes', 'perKill',
       'totalWinningPrice', 'maxBookings', 'remainingBookings', 'matchTitle',
-      'matchDescription', 'mapName', 'gameMode', 'tournamentName', 'maxPlayers',
-      'registrationDeadline', 'rules', 'prizeDistribution', 'contactInfo',
-      'streamLink', 'discordLink', 'specialRules', 'banList', 'bannerImage',
+      'mapName', 'gameMode', 'tournamentName', 'maxPlayers',
+      'rules', 'prizeDistribution', 'streamLink', 'discordLink', 'bannerImage',
       'firstwin', 'secwin', 'thirdwin', 'status'
     ];
 
@@ -940,8 +929,8 @@ exports.deleteGameMode = async (req, res) => {
       });
     }
     
-    // Soft delete by setting isActive to false
-    await GameMode.findByIdAndUpdate(id, { isActive: false });
+    // Hard delete the game mode
+    await GameMode.findByIdAndDelete(id);
     
     res.status(200).json({
       status: true,

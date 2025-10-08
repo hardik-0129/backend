@@ -1,7 +1,7 @@
 const getFullImageUrl = (imagePath) => {
   if (!imagePath) return null;
 
-  const baseUrl = 'https://api1.alphalions.io';
+  const baseUrl = 'http://192.168.1.7:5000';
 
   // Always normalize to the path that starts at /uploads
   const uploadsIndex = imagePath.indexOf('/uploads/');
