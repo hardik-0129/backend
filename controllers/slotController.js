@@ -59,6 +59,17 @@ const convertGameModesToFullUrls = (gameModes) => {
   return gameModes.map(gameMode => convertGameModeToFullUrls(gameMode));
 };
 
+const parseMatchTimeIST = (value) => {
+  if (!value) return undefined;
+  if (typeof value === 'string') {
+    const hasTz = /[zZ]$|[\+\-]\d{2}:?\d{2}$/.test(value);
+    if (hasTz) return new Date(value);
+    const withSeconds = value.length === 16 ? value + ':00' : value;
+    return new Date(withSeconds + '+05:30');
+  }
+  return new Date(value);
+};
+
 exports.createSlot = async (req, res) => {
   const {
     slotType,
@@ -117,12 +128,15 @@ exports.createSlot = async (req, res) => {
   }
 
   try {
+    // Normalize matchTime: if client sent without timezone, assume IST
+    const normalizedMatchTime = parseMatchTimeIST(matchTime);
+
     // Continue with slot creation
     const slot = new Slot({
       // Basic slot information
       slotType: slotType,
       entryFee,
-      matchTime,
+      matchTime: normalizedMatchTime,
       maxBookings: maxBookings || maxPlayers || 50,
       remainingBookings: remainingBookings || maxPlayers || 50,
       customStartInMinutes,
@@ -192,7 +206,11 @@ exports.updateSlot = async (req, res) => {
     const updateData = {};
     for (const key of allowedFields) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        updateData[key] = req.body[key];
+        if (key === 'matchTime') {
+          updateData[key] = parseMatchTimeIST(req.body[key]);
+        } else {
+          updateData[key] = req.body[key];
+        }
       }
     }
 

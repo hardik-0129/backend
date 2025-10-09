@@ -107,6 +107,45 @@ exports.getApkById = async (req, res) => {
   }
 };
 
+// Public: get latest APK by semantic filename (alpha_lions_vXYZ.apk) or newest mtime
+exports.getLatestApk = async (req, res) => {
+  try {
+    const files = fs.readdirSync(UPLOAD_DIR).filter(f => f.toLowerCase().endsWith('.apk'));
+    if (!files.length) {
+      return res.status(404).json({ success: false, error: 'No APK files found' });
+    }
+    let latestByNumber = null;
+    let maxNum = -1;
+    for (const f of files) {
+      const m = f.match(/alpha_lions_v(\d{3,})\.apk$/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxNum) {
+          maxNum = n;
+          latestByNumber = f;
+        }
+      }
+    }
+    let latest = latestByNumber;
+    if (!latest) {
+      // fallback: pick most recently modified
+      latest = files
+        .map(name => ({ name, mtime: fs.statSync(path.join(UPLOAD_DIR, name)).mtime.getTime() }))
+        .sort((a, b) => b.mtime - a.mtime)[0].name;
+    }
+    return res.status(200).json({
+      success: true,
+      fileName: latest,
+      url: `/uploads/apk/${latest}`,
+      downloadUrl: `/api/apk/${latest}/download`,
+      version: latest.match(/alpha_lions_v(\d{3,})/i)?.[1] || null
+    });
+  } catch (error) {
+    console.error('Get Latest APK Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to resolve latest APK', details: error.message });
+  }
+};
+
 exports.uploadNewApk = async (req, res) => {
   try {
     if (!req.file) {

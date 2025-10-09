@@ -4,8 +4,11 @@ const router = express.Router();
 const apkController = require('../controllers/apkFsController');
 const authentication = require('../middleware/adminAuth');
 
-// Get all APKs
+// Get all APKs (admin)
 router.get('/', authentication, apkController.getAllApks);
+
+// Public latest APK (no auth)
+router.get('/latest/public', apkController.getLatestApk);
 
 // Get single APK
 router.get('/:id', authentication, apkController.getApkById);
