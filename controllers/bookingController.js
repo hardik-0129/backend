@@ -49,6 +49,8 @@ const processReferralFirstPaidBonus = async (user, slot) => {
         // Give 5 rupees to referrer
         referrer.wallet += 5;
         referrer.totalReferralEarnings += 5;
+        // Count referral first-paid bonus as winnings for the referrer
+        referrer.winAmount = (parseFloat(referrer.winAmount) || 0) + 5;
         await referrer.save();
 
         // Create transaction for referrer
@@ -168,6 +170,21 @@ exports.createBooking = async (req, res) => {
 
     // Free match when entryFee is 0 (or less) OR explicitly flagged as "free matches"
     const isFreeMachatch = (Number(slot.entryFee) <= 0) || (String(slotType || '').toLowerCase() === "free matches");
+    
+    // Enforce: For FREE matches a user can book only ONE position total for the slot
+    if (isFreeMachatch) {
+      if (positionsCount !== 1) {
+        return res.status(400).json({
+          msg: 'Free match: only one position can be booked per user'
+        });
+      }
+      const existingUserBookingForSlot = await Booking.findOne({ slot: slotId, user: user._id }).lean();
+      if (existingUserBookingForSlot) {
+        return res.status(400).json({
+          msg: 'Free match: you have already booked a position for this match'
+        });
+      }
+    }
     const expectedAmount = isFreeMachatch ? 0 : Number(slot.entryFee || 0) * positionsCount;
 
     if (Math.abs(totalAmount - expectedAmount) > 0.01) {
@@ -176,11 +193,38 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Check wallet balance (skip for free matches)
-    if (!isFreeMachatch && user.wallet < totalAmount) {
-      return res.status(400).json({
-        msg: `Insufficient wallet balance. Required: ${totalAmount}, Available: ${user.wallet}`,
-      });
+    // Two-tier balance checking: first check join money (wallet), then win money (winAmount)
+    if (!isFreeMachatch) {
+      const joinMoney = parseFloat(user.wallet) || 0;
+      const winMoney = parseFloat(user.winAmount) || 0;
+      const totalBalance = joinMoney + winMoney;
+      
+      if (totalBalance < totalAmount) {
+        return res.status(400).json({
+          msg: `Insufficient balance. Required: ${totalAmount}, Available: ${totalBalance} (Join: ${joinMoney}, Win: ${winMoney})`,
+        });
+      }
+      
+      // Deduct from join money first, then from win money if needed
+      let remainingAmount = totalAmount;
+      let newWallet = joinMoney;
+      let newWinAmount = winMoney;
+      
+      if (joinMoney >= remainingAmount) {
+        // Enough join money - deduct only from wallet
+        newWallet = joinMoney - remainingAmount;
+        remainingAmount = 0;
+      } else {
+        // Not enough join money - use all join money, then deduct from win money
+        remainingAmount = remainingAmount - joinMoney;
+        newWallet = 0;
+        newWinAmount = winMoney - remainingAmount;
+        remainingAmount = 0;
+      }
+      
+      // Update user balances
+      user.wallet = newWallet;
+      user.winAmount = newWinAmount;
     }
 
     // Validate that all selected positions have player names
@@ -200,9 +244,8 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Deduct amount from wallet (skip for free matches)
+    // Save user with updated balances (already updated in two-tier logic above)
     if (!isFreeMachatch && totalAmount > 0) {
-      user.wallet -= totalAmount;
       await user.save();
       
       // Create transaction record for match booking
@@ -218,7 +261,7 @@ exports.createBooking = async (req, res) => {
           transactionId: transactionId,
           status: 'SUCCESS',
           paymentMethod: 'WALLET',
-          balanceAfter: user.wallet,
+          balanceAfter: user.wallet + user.winAmount, // Use total balance
           metadata: {
             slotId: slot._id.toString(),
             gameId: slot._id.toString(),
@@ -233,10 +276,10 @@ exports.createBooking = async (req, res) => {
       // Process referral bonus for first paid match
       await processReferralFirstPaidBonus(user, slot);
       
-      // Emit wallet update via socket.io
+      // Emit wallet update via socket.io (send total balance)
       try {
         const { emitWalletUpdate } = require('../websocket');
-        emitWalletUpdate(user._id.toString(), user.wallet);
+        emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount);
       } catch (e) {
         console.error('Socket emit error:', e);
       }
@@ -249,6 +292,12 @@ exports.createBooking = async (req, res) => {
     // --- Check if user already has a booking for this slot ---
     let userBooking = await Booking.findOne({ slot: slotId, user: user._id });
     if (userBooking) {
+      // For free matches, do not allow adding more positions once a booking exists
+      if (isFreeMachatch) {
+        return res.status(400).json({
+          msg: 'Free match: only one position per user is allowed'
+        });
+      }
       // Merge new positions and player names into existing booking
       // selectedPositions and playerNames are Map or object
       let existingPositions = userBooking.selectedPositions instanceof Map ? Object.fromEntries(userBooking.selectedPositions) : (userBooking.selectedPositions || {});

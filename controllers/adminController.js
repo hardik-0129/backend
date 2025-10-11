@@ -377,7 +377,8 @@ exports.distributeFunds = async (req, res) => {
         const newBalance = currentBalance + amount;
 
         await User.findByIdAndUpdate(userId, {
-          wallet: newBalance
+          wallet: newBalance,
+          $inc: { winAmount: amount }
         });
 
         // Create a WIN transaction so it gets counted in totalEarnings
@@ -460,8 +461,9 @@ exports.updateUserWinMoney = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Amount must be a positive number' });
     }
 
-    // Update wallet balance
+    // Update wallet balance and cumulative win amount
     user.wallet += amountToAdd;
+    user.winAmount = (parseFloat(user.winAmount) || 0) + amountToAdd;
 
     // Create WIN transaction so it's included in totalEarnings
     const Transaction = require('../models/Transaction');
@@ -479,7 +481,7 @@ exports.updateUserWinMoney = async (req, res) => {
 
     await user.save();
 
-    res.json({ success: true, message: 'Win money added successfully', newBalance: user.wallet });
+    res.json({ success: true, message: 'Win money added successfully', newBalance: user.wallet, winAmount: user.winAmount });
   } catch (error) {
     console.error('Update user win money error:', error);
     res.status(500).json({ success: false, error: 'Failed to update user win money', details: error.message });

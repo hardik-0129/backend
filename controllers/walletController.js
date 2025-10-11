@@ -55,9 +55,15 @@ exports.checkOrderStatus = async (req, res) => {
             transactionId: order_id,
             status: 'SUCCESS',
             paymentMethod: 'TRANZUPI',
-            balanceAfter: user.wallet,
+            balanceAfter: user.wallet + user.winAmount, // Use total balance
             metadata: { order_id }
           });
+
+          // Emit wallet update via websocket
+          try {
+            const { emitWalletUpdate } = require('../websocket');
+            emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount); // Emit total balance
+          } catch (e) { console.error('Socket emit error:', e); }
         }
       }
       return res.json({ success: true, result: data.result });
@@ -125,7 +131,7 @@ console.log(orderId, amount, remark1);
     // Emit wallet update via websocket
     try {
       const { emitWalletUpdate } = require('../websocket');
-      emitWalletUpdate(user._id.toString(), user.wallet);
+      emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount); // Emit total balance
     } catch (e) { console.error('Socket emit error:', e); }
 
     return res.json({ success: true });
@@ -222,6 +228,8 @@ exports.verify = async (req, res) => {
     // Add the funds to wallet
     const previousBalance = user.wallet;
     user.wallet += parseFloat(amount);
+    // Track cumulative winnings
+    user.winAmount = (parseFloat(user.winAmount) || 0) + parseFloat(amount);
     await user.save();
 
     // Create transaction record
@@ -264,7 +272,7 @@ exports.getBalance = async (req, res) => {
       }
 
 
-    const user = await User.findById(id).select('wallet');
+    const user = await User.findById(id).select('wallet winAmount');
     if (!user) {
       return res.status(404).json({ 
         status: false,
@@ -292,7 +300,7 @@ exports.getBalance = async (req, res) => {
           ]
         }
       },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+      { $group: { _id: null, total: { $sum: { $convert: { input: '$amount', to: 'double', onError: 0, onNull: 0 } } } } }
     ]);
     const totalWinsFromTx = winAggTx[0]?.total || 0;
     const totalWins = (totalWinsFromWinners || 0) + (totalWinsFromTx || 0);
@@ -300,7 +308,7 @@ exports.getBalance = async (req, res) => {
     // Total payouts: sum of all successful DEBIT/WITHDRAW
     const payoutsAgg = await Transaction.aggregate([
       { $match: { userId: user._id, type: { $in: ['DEBIT', 'WITHDRAW'] }, status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+      { $group: { _id: null, total: { $sum: { $convert: { input: '$amount', to: 'double', onError: 0, onNull: 0 } } } } }
     ]);
     const totalPayouts = payoutsAgg[0]?.total || 0;
 
@@ -316,13 +324,15 @@ exports.getBalance = async (req, res) => {
     const earningsAfterHold = Math.max(0, withdrawableEarnings - pendingWithdrawals);
     const balanceWithoutHolds = Math.max(0, (parseFloat(user.wallet) || 0) - (parseFloat(pendingWithdrawals) || 0));
 
+    const winAmt = parseFloat(user.winAmount) || 0;
+    const wallet = parseFloat(user.wallet) || 0;
+    const totalBalance = wallet + winAmt;
     res.json({ 
       status: true,
-      balance: user.wallet,
-      balanceWithoutHolds,
-      totalEarnings: earningsAfterHold,
-      totalPayouts,
-      pendingWithdrawals
+      joinAmount :wallet, // join money
+      winAmount: winAmt, // winnings
+      totalBalance, // wallet + winAmount
+      totalPayouts
     });
   } catch (err) {
     console.error('Get Balance Error:', err);
@@ -450,24 +460,29 @@ exports.tranzupiWithdraw = async (req, res) => {
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]);
       const totalPayouts = payoutsAgg[0]?.total || 0;
-
+      console.log("totalWinsFromWinners",totalWinsFromWinners);
+      console.log("totalWinsFromTx",totalWinsFromTx);
+      console.log("totalPayouts",totalPayouts);
       earningBalance = Math.max(0, (totalWinsFromWinners + totalWinsFromTx) - totalPayouts);
+      console.log("earningBalance",earningBalance);
     } catch (_) {
       earningBalance = 0;
     }
-
-    // Enforce earnings-only withdrawal
-    if (parseFloat(amount) > earningBalance) {
+    console.log(typeof earningBalance,typeof amount);
+    console.log(earningBalance,amount);
+    console.log(parseFloat(amount) > earningBalance);
+    
+    // Enforce winAmount-only withdrawal based on User model
+    const currentWinAmount = parseFloat(user.winAmount) || 0;
+    if (parseFloat(amount) > currentWinAmount) {
       return res.status(400).json({ 
         success: false,
-        error: 'You can withdraw only from your winnings balance.'
+        error: 'Insufficient win amount to withdraw.'
       });
     }
 
-    // Also ensure overall wallet has funds (should normally be true if earnings tracked correctly)
-    if (user.wallet < parseFloat(amount)) {
-      return res.status(400).json({ success: false, error: 'Insufficient wallet balance' });
-    }
+    // Do NOT enforce overall wallet (join money) for withdrawals.
+    // Withdrawals should be from winAmount only.
 
     // Check if TranzUPI is properly configured
     if (!TRANZUPI_CONFIG.api_key || !TRANZUPI_CONFIG.merchant_id || !TRANZUPI_CONFIG.secret_key) {
@@ -494,9 +509,18 @@ exports.tranzupiWithdraw = async (req, res) => {
       metadata: {
         upiId: upi_id,
         beneficiaryUserId: userId,
-        requiresAdminApproval: true
+        requiresAdminApproval: true,
+        winDeductedOnRequest: true
       }
     });
+
+    // Immediately deduct from user's winnings (earnings) ONLY for pending request
+    try {
+      const currentWin = parseFloat(user.winAmount) || 0;
+      const amt = parseFloat(amount);
+      user.winAmount = Math.max(0, currentWin - amt);
+      await user.save();
+    } catch (_) {}
 
     // Check if we're in test/development mode (mock withdrawal for admin approval testing)
     if (TRANZUPI_CONFIG.base_url.includes('tranzupi.com/api/create-order') || !TRANZUPI_CONFIG.api_key.startsWith('live_')) {
@@ -542,7 +566,7 @@ exports.tranzupiWithdraw = async (req, res) => {
     });
 
     if (response.data.success) {
-      // Do NOT deduct wallet on request; keep PENDING for admin to approve/reject
+      // Wallet not deducted on request; earnings already reduced above
       return res.json({
         success: true,
         message: 'Withdrawal request submitted successfully. It will be processed after admin approval.',
@@ -607,10 +631,14 @@ class CreateOrderAPI {
 exports.createTranzUPIOrder = async (req, res) => {
   try {
     const { customerMobile, amount, orderId, redirectUrl, remark1, remark2 } = req.body;
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt < 10) {
+      return res.status(400).json({ success: false, error: 'Minimum add amount is ₹10' });
+    }
     const userToken = process.env.TRANZUPI_API_KEY;
     const api = new CreateOrderAPI('https://tranzupi.com/api/create-order');
 
-    const order = await api.createOrder(customerMobile, userToken, amount, orderId, redirectUrl, remark1, remark2);
+    const order = await api.createOrder(customerMobile, userToken, amt, orderId, redirectUrl, remark1, remark2);
     res.status(200).json({ success: true, order });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -672,14 +700,14 @@ exports.tranzupiCallback = async (req, res) => {
           transactionId: transaction_id,
           status: 'SUCCESS',
           paymentMethod: 'TRANZUPI',
-          balanceAfter: user.wallet,
+          balanceAfter: user.wallet + user.winAmount, // Use total balance
           metadata: { transaction_id }
         });
 
-        // Emit wallet update via socket.io
+        // Emit wallet update via websocket
         try {
           const { emitWalletUpdate } = require('../websocket');
-          emitWalletUpdate(user._id.toString(), user.wallet);
+          emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount); // Emit total balance
         } catch (e) {
           console.error('Socket emit error:', e);
         }
@@ -777,63 +805,63 @@ exports.approveWithdrawal = async (req, res) => {
     const user = transaction.userId;
 
     // Calculate earning balance (winning money only)
-    let earningBalance = 0;
-    try {
-      const winAgg = await require('../models/Winner').aggregate([
-        { $match: { userId: user._id } },
-        { $group: { _id: null, total: { $sum: '$winningPrice' } } }
-      ]);
-      const totalWinsFromWinners = winAgg[0]?.total || 0;
+    // let earningBalance = 0;
+    // try {
+      // const winAgg = await require('../models/Winner').aggregate([
+      //   { $match: { userId: user._id } },
+      //   { $group: { _id: null, total: { $sum: '$winningPrice' } } }
+      // ]);
+      // const totalWinsFromWinners = winAgg[0]?.total || 0;
 
       // Include winning credits recorded in Transactions as well
-      const winAggTx = await Transaction.aggregate([
-        { $match: {
-            userId: user._id,
-            status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] },
-            $or: [
-              { type: 'WIN' },
-              { type: 'CREDIT', description: { $regex: /(winning|win\s+credited)/i } },
-              { type: 'CREDIT', 'metadata.category': 'WIN' }
-            ]
-          }
-        },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]);
-      const totalWinsFromTx = winAggTx[0]?.total || 0;
-      const totalWins = (totalWinsFromWinners || 0) + (totalWinsFromTx || 0);
+      // const winAggTx = await Transaction.aggregate([
+      //   { $match: {
+      //       userId: user._id,
+      //       status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] },
+      //       $or: [
+      //         { type: 'WIN' },
+      //         { type: 'CREDIT', description: { $regex: /(winning|win\s+credited)/i } },
+      //         { type: 'CREDIT', 'metadata.category': 'WIN' }
+      //       ]
+      //     }
+      //   },
+      //   { $group: { _id: null, total: { $sum: '$amount' } } }
+      // ]);
+      // const totalWinsFromTx = winAggTx[0]?.total || 0;
+      // const totalWins = (totalWinsFromWinners || 0) + (totalWinsFromTx || 0);
 
       // Total payouts: sum of all successful DEBIT/WITHDRAW
-      const payoutsAgg = await Transaction.aggregate([
-        { $match: { userId: user._id, type: { $in: ['DEBIT', 'WITHDRAW'] }, status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]);
-      const totalPayouts = payoutsAgg[0]?.total || 0;
+      // const payoutsAgg = await Transaction.aggregate([
+      //   { $match: { userId: user._id, type: { $in: ['DEBIT', 'WITHDRAW'] }, status: { $in: ['SUCCESS', 'ADMIN_APPROVED'] } } },
+      //   { $group: { _id: null, total: { $sum: '$amount' } } }
+      // ]);
+      // const totalPayouts = payoutsAgg[0]?.total || 0;
 
-      // Earning balance = total winnings - payouts (cannot be negative)
-      earningBalance = Math.max(0, (totalWins || 0) - (totalPayouts || 0));
-    } catch (e) {
-      earningBalance = 0;
-    }
+      // // Earning balance = total winnings - payouts (cannot be negative)
+      // earningBalance = Math.max(0, (totalWins || 0) - (totalPayouts || 0));
+    // } catch (e) {
+    //   earningBalance = 0;
+    // }
 
-    // Check if user has sufficient earning balance for withdrawal
-    if (parseFloat(transaction.amount) > earningBalance) {
-      return res.status(400).json({
-        success: false,
-        error: 'Insufficient earnings balance to approve this withdrawal. User can withdraw only from winnings.'
-      });
-    }
+    // // Check if user has sufficient earning balance for withdrawal
+    // if (parseFloat(transaction.amount) > earningBalance) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: 'Insufficient earnings balance to approve this withdrawal. User can withdraw only from winnings.'
+    //   });
+    // }
 
     // Check if user has sufficient total wallet balance
-    if (user.wallet < transaction.amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'User has insufficient balance for this withdrawal'
-      });
-    }
+    // if (user.winAmount < transaction.amount) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: 'User has insufficient balance for this withdrawal'
+    //   });
+    // }
 
-    // Process the withdrawal: deduct once on approval
-    user.wallet -= transaction.amount;
-    await user.save();
+    // Wallet deduction should have happened on request; do NOT deduct again here.
+    // Only finalize status to approved; no second debit.
+    // await user.save();
 
     // Referral commission logic: 5% to referrer if user registered with a referral code
     if (user.referredBy) {
@@ -842,6 +870,8 @@ exports.approveWithdrawal = async (req, res) => {
         let commission = Math.round(parseFloat(transaction.amount) * 0.05);
         if (commission < 1) commission = 1;
         referrer.wallet += commission;
+        // Count referral commissions as part of overall winnings
+        referrer.winAmount = (parseFloat(referrer.winAmount) || 0) + commission;
         await referrer.save();
         await Transaction.create({
           userId: referrer._id,
@@ -926,6 +956,24 @@ exports.rejectWithdrawal = async (req, res) => {
       });
     }
 
+    // Restore user's balances because we deducted them on request
+    try {
+      const user = transaction.userId;
+      const amt = parseFloat(transaction.amount || 0);
+      // Restore only winAmount (do not modify join money)
+      user.winAmount = (parseFloat(user.winAmount) || 0) + amt;
+      await user.save();
+      // Notify client of wallet change (total balance = wallet + winAmount)
+      try {
+        const { emitWalletUpdate } = require('../websocket');
+        emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount);
+      } catch (e2) {
+        console.error('Socket emit error (walletUpdate after rejection):', e2);
+      }
+    } catch (e) {
+      console.error('Restore winAmount on reject failed:', e);
+    }
+
     // Update transaction status
     transaction.status = 'ADMIN_REJECTED';
     transaction.adminApproval.rejectionReason = rejectionReason;
@@ -977,8 +1025,8 @@ exports.tranzupiWithdrawalCallback = async (req, res) => {
     });
 
     if (user && status === 'failed') {
-      // If withdrawal failed, refund the amount
-      user.wallet += parseFloat(amount);
+      // If withdrawal failed, refund to winAmount only (do not touch join money)
+      user.winAmount = (parseFloat(user.winAmount) || 0) + parseFloat(amount);
       await user.save();
     }
 
@@ -1003,18 +1051,19 @@ exports.addWinningToWallet = async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-    user.wallet += parseFloat(amount);
+    // Only add to winAmount (winnings), NOT to wallet (join money)
+    user.winAmount = (parseFloat(user.winAmount) || 0) + parseFloat(amount);
     await user.save();
     // Create transaction record for winner
     await Transaction.create({
       userId: user._id,
-      type: 'CREDIT',
+      type: 'WIN',
       amount: amount,
       description: `Winning credited for match ${matchId || ''}`.trim(),
       transactionId: `WIN_${user._id}_${Date.now()}`,
       status: 'SUCCESS',
       paymentMethod: 'SYSTEM',
-      balanceAfter: user.wallet,
+      balanceAfter: user.wallet + user.winAmount, // Use total balance
       metadata: { matchId, winnerId }
     });
 
@@ -1026,7 +1075,8 @@ exports.addWinningToWallet = async (req, res) => {
       if (referrer && String(referrer._id) !== String(user._id)) {
         const reward = Math.floor((parseFloat(amount) * 0.05));
         if (reward > 0) {
-          referrer.wallet += reward;
+          // Only add to winAmount (winnings), NOT to wallet (join money)
+          referrer.winAmount = (parseFloat(referrer.winAmount) || 0) + reward;
           await referrer.save();
           await Transaction.create({
             userId: referrer._id,
@@ -1036,14 +1086,48 @@ exports.addWinningToWallet = async (req, res) => {
             transactionId: `REF_${referrer._id}_${Date.now()}`,
             status: 'SUCCESS',
             paymentMethod: 'SYSTEM',
-            balanceAfter: referrer.wallet,
+            balanceAfter: referrer.wallet + referrer.winAmount, // Use total balance
             metadata: { referredUser: user._id, matchId, winnerId }
           });
         }
       }
     }
 
-    res.json({ success: true, msg: 'Winning amount added to wallet', wallet: user.wallet });
+    res.json({ success: true, msg: 'Winning amount added to winAmount', totalBalance: user.wallet + user.winAmount });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+exports.addJoinMoneyToWallet = async (req, res) => {
+  try {
+    const { userId, amount, description } = req.body;
+    if (!userId || !amount) {
+      return res.status(400).json({ success: false, error: 'userId and amount are required' });
+    }
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    // Only add to wallet (join money), NOT to winAmount
+    user.wallet = (parseFloat(user.wallet) || 0) + parseFloat(amount);
+    await user.save();
+    
+    // Create transaction record
+    await Transaction.create({
+      userId: user._id,
+      type: 'CREDIT',
+      amount: amount,
+      description: description || 'Admin credit: Join Money',
+      transactionId: `ADMIN_JOIN_${user._id}_${Date.now()}`,
+      status: 'SUCCESS',
+      paymentMethod: 'ADMIN',
+      balanceAfter: user.wallet + user.winAmount, // Use total balance
+      metadata: { adminAction: true }
+    });
+
+    res.json({ success: true, msg: 'Join money added to wallet', totalBalance: user.wallet + user.winAmount });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

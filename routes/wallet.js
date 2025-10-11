@@ -24,6 +24,7 @@ router.get("/payment/callback", (req, res) => {
 router.post('/tranzupi/check-order-status', walletController.checkOrderStatus);
 router.post('/tranzupi/webhook', walletController.tranzupiWebhook);
 router.post('/add-winning', walletController.addWinningToWallet);
+router.post('/add-join-money', authentication, walletController.addJoinMoneyToWallet);
 router.get('/balance', authentication, walletController.getBalance);
 router.post('/verify', authentication, walletController.verify);
 router.post('/transactions', authentication, walletController.getTransactionHistory);
