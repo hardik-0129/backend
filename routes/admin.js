@@ -31,5 +31,8 @@ router.get('/slots/:slotId/tournament-rules', authentication, slotController.get
 
 // Slot management routes
 
+// Replace sitemap.xml (admin only)
+router.post('/replace-sitemap', authentication, adminController.replaceSitemap);
+
 module.exports = router;
 

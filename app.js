@@ -22,7 +22,7 @@ const cronScheduler = require('./services/cronScheduler');
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://192.168.1.5:8080', "https://esports.alphalions.io"],
+  origin: ['http://localhost:8080', 'http://192.168.1.6:8080', "https://esports.alphalions.io"],
   credentials: true
 }));
 // Increase body limits to accommodate larger payloads (metadata, base64, etc.)

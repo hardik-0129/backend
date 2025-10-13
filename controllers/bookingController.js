@@ -171,17 +171,35 @@ exports.createBooking = async (req, res) => {
     // Free match when entryFee is 0 (or less) OR explicitly flagged as "free matches"
     const isFreeMachatch = (Number(slot.entryFee) <= 0) || (String(slotType || '').toLowerCase() === "free matches");
     
-    // Enforce: For FREE matches a user can book only ONE position total for the slot
+    // Enforce position limits for FREE matches based on game mode
     if (isFreeMachatch) {
-      if (positionsCount !== 1) {
+      const normalizedSlotType = normalizeSlotType(slotType);
+      let maxPositionsPerUser = 1; // Default for solo
+      
+      // Set position limits based on game mode
+      if (normalizedSlotType === 'solo') {
+        maxPositionsPerUser = 1;
+      } else if (normalizedSlotType === 'duo') {
+        maxPositionsPerUser = 2;
+      } else if (normalizedSlotType === 'squad') {
+        maxPositionsPerUser = 4;
+      }
+      
+      // Check if user is trying to book more positions than allowed
+      if (positionsCount > maxPositionsPerUser) {
         return res.status(400).json({
-          msg: 'Free match: only one position can be booked per user'
+          msg: `Free match: you can only book ${maxPositionsPerUser} position(s) for ${normalizedSlotType} mode`
         });
       }
+      
+      // For free matches, allow users to book any number of positions up to the maximum
+      // No minimum requirement - users can book 1, 2, 3, or 4 positions as they prefer
+      
+      // Check if user has already booked positions for this slot (only after validating position count)
       const existingUserBookingForSlot = await Booking.findOne({ slot: slotId, user: user._id }).lean();
       if (existingUserBookingForSlot) {
         return res.status(400).json({
-          msg: 'Free match: you have already booked a position for this match'
+          msg: 'Free match: you have already booked positions for this match'
         });
       }
     }
@@ -660,6 +678,58 @@ exports.updateWinnerStats = async (req, res) => {
   } catch (err) {
     console.error("Error updating winner stats:", err);
     res.status(500).json({ msg: "Server error" });
+  }
+};
+
+// Get a specific user's booking for a specific slot
+exports.getUserSlotBooking = async (req, res) => {
+  try {
+    const { userId, slotId } = req.body || {};
+    console.log('userId', req.body);
+    if (!userId || !slotId) {
+      return res.status(200).json({ success: false, msg: 'userId and slotId are required in body' });
+    }
+
+    const booking = await Booking.findOne({ user: userId, slot: slotId })
+      .populate('user', 'name email phone freeFireUsername')
+      .populate('slot', 'slotType matchTitle tournamentName matchTime entryFee totalWinningPrice');
+    // console.log('booking', booking);
+    if (!booking) {
+      return res.status(200).json({ success: false, msg: 'Booking not found for this user and slot' });
+    }
+
+    // Convert potential Map fields to plain objects
+    let selectedPositions = {};
+    let playerNames = {};
+    if (booking.selectedPositions) {
+      if (booking.selectedPositions instanceof Map) {
+        selectedPositions = Object.fromEntries(booking.selectedPositions);
+      } else if (typeof booking.selectedPositions === 'object') {
+        selectedPositions = booking.selectedPositions;
+      }
+    }
+    if (booking.playerNames) {
+      if (booking.playerNames instanceof Map) {
+        playerNames = Object.fromEntries(booking.playerNames);
+      } else if (typeof booking.playerNames === 'object') {
+        playerNames = booking.playerNames;
+      }
+    }
+console.log('booking', booking);
+console.log('selectedPositions', selectedPositions);
+console.log('playerNames', playerNames);
+    return res.status(200).json({
+      success: true,
+      bookings: {
+        ...booking.toObject(),
+        selectedPositions,
+        playerNames
+      }
+    });
+    console.log('booking', booking);
+  } catch (err) {
+    console.error('Error fetching user slot booking:', err);
+    return res.status(500).json({ success: false, msg: 'Failed to fetch booking', error: err.message });
   }
 };
 

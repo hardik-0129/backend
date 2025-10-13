@@ -4,6 +4,8 @@ const Admin = require('../models/Admin');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Slot = require('../models/Slot');
+const fs = require('fs');
+const path = require('path');
 
 exports.adminLogin = async (req, res) => {
   try {
@@ -485,6 +487,33 @@ exports.updateUserWinMoney = async (req, res) => {
   } catch (error) {
     console.error('Update user win money error:', error);
     res.status(500).json({ success: false, error: 'Failed to update user win money', details: error.message });
+  }
+};
+
+
+// Admin: replace sitemap.xml content
+exports.replaceSitemap = async (req, res) => {
+  try {
+    const { xml } = req.body;
+    if (!xml || typeof xml !== 'string' || !xml.trim().startsWith('<?xml')) {
+      return res.status(400).json({ success: false, error: 'Valid XML string is required in body.xml' });
+    }
+
+    // Resolve sitemap path in frontend project
+    const sitemapPath = path.resolve(__dirname, '..', '..', 'freefire-slot-arena', 'public', 'sitemap.xml');
+
+    // Ensure directory exists
+    fs.mkdirSync(path.dirname(sitemapPath), { recursive: true });
+
+    // Write file atomically
+    const tempPath = sitemapPath + '.tmp';
+    fs.writeFileSync(tempPath, xml, { encoding: 'utf8' });
+    fs.renameSync(tempPath, sitemapPath);
+
+    return res.status(200).json({ success: true, message: 'sitemap.xml replaced successfully' });
+  } catch (error) {
+    console.error('Replace sitemap error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to replace sitemap', details: error.message });
   }
 };
 

@@ -1442,7 +1442,7 @@ exports.getTransactionHistoryAdmin = async (req, res) => {
               $cond: [
                 { $eq: ['$type', 'WIN'] },
                 '$amount',
-                0
+                0 
               ]
             }
           },

@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const nftService = require('./nftService');
+const { cleanupOldNotifications } = require('./notificationCleanup');
 
 class CronScheduler {
   constructor() {
@@ -18,6 +19,8 @@ class CronScheduler {
 
     // Schedule NFT count update every 24 hours at 2:00 AM
     this.scheduleNFTUpdate();
+    // Schedule notification cleanup every 24 hours at 12:00 AM (midnight)
+    this.scheduleNotificationCleanup();
   }
 
   /**
@@ -68,6 +71,26 @@ class CronScheduler {
     this.jobs.set('nftUpdate', job);
     job.start();
      }
+
+  /**
+   * Schedule Notification cleanup job
+   */
+  scheduleNotificationCleanup() {
+    // Run every day at 12:00 AM UTC
+    const cronExpression = '0 0 0 * * *';
+    const job = cron.schedule(cronExpression, async () => {
+      try {
+        await cleanupOldNotifications(10);
+      } catch (error) {
+        console.error('Error in scheduled notification cleanup:', error.message);
+      }
+    }, {
+      scheduled: false,
+      timezone: 'UTC'
+    });
+    this.jobs.set('notificationCleanup', job);
+    job.start();
+  }
 
   /**
    * Manually trigger NFT count update
