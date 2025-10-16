@@ -365,7 +365,9 @@ exports.adminUpdateUser = async (req, res) => {
       phone, 
       freeFireUsername, 
       wallet, 
-      isAdmin
+      isAdmin,
+      winAmount,
+      freeMatchPass
     } = req.body;
 
     // Check if admin is making the request
@@ -398,6 +400,8 @@ exports.adminUpdateUser = async (req, res) => {
     if (freeFireUsername !== undefined) updateFields.freeFireUsername = freeFireUsername;
     if (wallet !== undefined) updateFields.wallet = parseFloat(wallet);
     if (isAdmin !== undefined) updateFields.isAdmin = isAdmin;
+    if (winAmount !== undefined) updateFields.winAmount = parseFloat(winAmount);
+    if (freeMatchPass !== undefined) updateFields.freeMatchPass = parseInt(freeMatchPass);
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
