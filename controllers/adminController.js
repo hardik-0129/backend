@@ -78,17 +78,33 @@ exports.createSlot = async (req, res) => {
   }
 };
 
-// Get all users
+// Get all users with pagination
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({ isAdmin: false })
-      .select('-password') // Exclude password from response
-      .sort({ createdAt: -1 }); // Sort by newest first
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit, 10) || 20, 1);
+    const filter = { isAdmin: false };
+
+    const total = await User.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit) || 1;
+    const currentPage = Math.min(page, totalPages);
+    const skip = (currentPage - 1) * limit;
+
+    const users = await User.find(filter)
+      .select('-password')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     res.status(200).json({
       msg: 'Users fetched successfully',
       users,
-      totalUsers: users.length
+      pagination: {
+        total,
+        totalPages,
+        page: currentPage,
+        limit
+      }
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server error. Please try again later.' });

@@ -272,7 +272,7 @@ exports.getBalance = async (req, res) => {
       }
 
 
-    const user = await User.findById(id).select('wallet winAmount');
+    const user = await User.findById(id).select('wallet winAmount freeMatchPass');
     if (!user) {
       return res.status(404).json({ 
         status: false,
@@ -332,7 +332,8 @@ exports.getBalance = async (req, res) => {
       joinAmount :wallet, // join money
       winAmount: winAmt, // winnings
       totalBalance, // wallet + winAmount
-      totalPayouts
+      totalPayouts,
+      freeMatchPass: Number(user.freeMatchPass) || 0
     });
   } catch (err) {
     console.error('Get Balance Error:', err);
@@ -1514,6 +1515,97 @@ exports.getTransactionHistoryAdmin = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch transaction history',
+      details: err.message
+    });
+  }
+};
+
+// Delete transaction (Admin only)
+exports.deleteTransaction = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const adminId = req.user.adminId; // Admin ID from admin auth middleware
+
+    // Find the transaction
+    const transaction = await Transaction.findById(transactionId).populate('userId');
+    
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transaction not found'
+      });
+    }
+
+    // Check if transaction can be deleted (only allow deletion of certain types)
+    const deletableTypes = ['CREDIT', 'DEBIT', 'WIN', 'MATCH_ENTRY', 'BOOKING'];
+    if (!deletableTypes.includes(transaction.type)) {
+      return res.status(400).json({
+        success: false,
+        error: 'This type of transaction cannot be deleted'
+      });
+    }
+
+    // Check if transaction is in a state that allows deletion
+    if (transaction.status === 'PENDING_ADMIN_APPROVAL') {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete pending transactions. Please approve or reject first.'
+      });
+    }
+
+    // If it's a successful transaction that affected user balance, we need to reverse it
+    if (transaction.status === 'SUCCESS' || transaction.status === 'ADMIN_APPROVED') {
+      const user = transaction.userId;
+      
+      if (user) {
+        // Reverse the transaction effect on user balance
+        if (transaction.type === 'CREDIT' || transaction.type === 'DEPOSIT' || transaction.type === 'WIN') {
+          // Subtract from user's balance
+          if (transaction.type === 'WIN') {
+            user.winAmount = Math.max(0, (parseFloat(user.winAmount) || 0) - parseFloat(transaction.amount));
+          } else {
+            user.wallet = Math.max(0, (parseFloat(user.wallet) || 0) - parseFloat(transaction.amount));
+          }
+        } else if (transaction.type === 'DEBIT' || transaction.type === 'WITHDRAW') {
+          // Add back to user's balance
+          if (transaction.type === 'WITHDRAW') {
+            user.winAmount = (parseFloat(user.winAmount) || 0) + parseFloat(transaction.amount);
+          } else {
+            user.wallet = (parseFloat(user.wallet) || 0) + parseFloat(transaction.amount);
+          }
+        }
+        
+        await user.save();
+        
+        // Emit wallet update via websocket
+        try {
+          const { emitWalletUpdate } = require('../websocket');
+          emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount);
+        } catch (e) {
+          console.error('Socket emit error:', e);
+        }
+      }
+    }
+
+    // Delete the transaction
+    await Transaction.findByIdAndDelete(transactionId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Transaction deleted successfully',
+      transaction: {
+        id: transactionId,
+        type: transaction.type,
+        amount: transaction.amount,
+        userEmail: transaction.userId?.email
+      }
+    });
+
+  } catch (err) {
+    console.error('Delete Transaction Error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete transaction',
       details: err.message
     });
   }

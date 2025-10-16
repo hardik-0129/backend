@@ -39,5 +39,6 @@ router.post('/admin/approve-withdrawal/:transactionId', authentication, walletCo
 router.post('/admin/reject-withdrawal/:transactionId', authentication, walletController.rejectWithdrawal);
 router.get('/admin/all-transactions', authentication, walletController.getAllTransactions);
 router.get('/admin/transaction-history', authentication, walletController.getTransactionHistoryAdmin);
+router.delete('/admin/delete-transaction/:transactionId', authentication, walletController.deleteTransaction);
 
 module.exports = router;

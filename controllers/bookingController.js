@@ -37,6 +37,23 @@ const createTransaction = async (data) => {
   }
 };
 
+// Helper function to check if user has ever played a paid match
+const hasUserPlayedPaidMatch = async (userId) => {
+  try {
+    // Check if user has any completed bookings for paid matches (entryFee > 0)
+    const paidMatchBookings = await Booking.find({
+      user: userId,
+      entryFee: { $gt: 0 },
+      status: { $in: ['confirmed', 'completed'] }
+    }).populate('slot', 'entryFee');
+    
+    return paidMatchBookings.length > 0;
+  } catch (error) {
+    console.error('Error checking paid match history:', error);
+    return false; // Default to false to be safe
+  }
+};
+
 // Helper function to process referral bonus for first paid match
 const processReferralFirstPaidBonus = async (user, slot) => {
   try {
@@ -171,8 +188,25 @@ exports.createBooking = async (req, res) => {
     // Free match when entryFee is 0 (or less) OR explicitly flagged as "free matches"
     const isFreeMachatch = (Number(slot.entryFee) <= 0) || (String(slotType || '').toLowerCase() === "free matches");
     
+    // Check if user is trying to join a free match without having played any paid matches
+    if (isFreeMachatch) {
+      const hasPlayedPaidMatch = await hasUserPlayedPaidMatch(user._id);
+      if (!hasPlayedPaidMatch) {
+        return res.status(400).json({
+          msg: "You must play at least one paid match before joining free matches. Please join a paid match first and then you can participate in free matches."
+        });
+      }
+    }
+    
     // Enforce position limits for FREE matches based on game mode
     if (isFreeMachatch) {
+      // Require FreeMatchPass to enter a free match
+      const currentPasses = parseInt(user.freeMatchPass) || 0;
+      if (currentPasses <= 0) {
+        return res.status(400).json({
+          msg: 'You need a FreeMatchPass to join a free match. Play paid matches to earn passes.'
+        });
+      }
       const normalizedSlotType = normalizeSlotType(slotType);
       let maxPositionsPerUser = 1; // Default for solo
       
@@ -202,6 +236,11 @@ exports.createBooking = async (req, res) => {
           msg: 'Free match: you have already booked positions for this match'
         });
       }
+      // Consume one pass for this free match booking
+      try {
+        user.freeMatchPass = Math.max(0, (parseInt(user.freeMatchPass) || 0) - 1);
+        await user.save();
+      } catch (e) { }
     }
     const expectedAmount = isFreeMachatch ? 0 : Number(slot.entryFee || 0) * positionsCount;
 
@@ -240,9 +279,12 @@ exports.createBooking = async (req, res) => {
         remainingAmount = 0;
       }
       
-      // Update user balances
+      // Update user balances and grant one FreeMatchPass for a paid match
       user.wallet = newWallet;
       user.winAmount = newWinAmount;
+      try {
+        user.freeMatchPass = (parseInt(user.freeMatchPass) || 0) + 1;
+      } catch (e) { user.freeMatchPass = 1; }
     }
 
     // Validate that all selected positions have player names
@@ -754,5 +796,188 @@ exports.getWinnersBySlot = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, msg: "Failed to fetch winners", error: err.message });
+  }
+};
+
+// Update booking function with paid match requirement validation
+exports.updateBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const {
+      selectedPositions,
+      playerNames,
+      totalAmount,
+      slotType,
+      playerIndex,
+    } = req.body;
+
+    // Validate required fields
+    if (!bookingId) {
+      return res.status(400).json({
+        msg: "Booking ID is required"
+      });
+    }
+
+    // Find the existing booking
+    const existingBooking = await Booking.findById(bookingId).populate('slot').populate('user');
+    if (!existingBooking) {
+      return res.status(404).json({ msg: "Booking not found" });
+    }
+
+    // Get user from the booking
+    const user = existingBooking.user;
+    const slot = existingBooking.slot;
+
+    // Check if slot has available bookings for new positions
+    if (slot.remainingBookings <= 0) {
+      return res.status(400).json({ msg: "Slot is full" });
+    }
+
+    // Calculate positions count if new positions are provided
+    let positionsCount = 0;
+    if (selectedPositions) {
+      positionsCount = Object.values(selectedPositions).reduce(
+        (total, positions) => total + positions.length,
+        0
+      );
+    }
+
+    // Free match when entryFee is 0 (or less) OR explicitly flagged as "free matches"
+    const isFreeMachatch = (Number(slot.entryFee) <= 0) || (String(slotType || '').toLowerCase() === "free matches");
+    
+    // Check if user is trying to join a free match without having played any paid matches
+    if (isFreeMachatch) {
+      const hasPlayedPaidMatch = await hasUserPlayedPaidMatch(user._id);
+      if (!hasPlayedPaidMatch) {
+        return res.status(400).json({
+          msg: "You must play at least one paid match before joining free matches. Please join a paid match first and then you can participate in free matches."
+        });
+      }
+    }
+
+    // Validate total amount calculation if provided
+    if (totalAmount !== undefined) {
+      const expectedAmount = isFreeMachatch ? 0 : Number(slot.entryFee || 0) * positionsCount;
+      
+      if (Math.abs(totalAmount - expectedAmount) > 0.01) {
+        return res.status(400).json({
+          msg: `Amount mismatch. Expected: ${expectedAmount}, Received: ${totalAmount}`,
+        });
+      }
+    }
+
+    // Two-tier balance checking for paid matches
+    if (!isFreeMachatch && totalAmount > 0) {
+      const joinMoney = parseFloat(user.wallet) || 0;
+      const winMoney = parseFloat(user.winAmount) || 0;
+      const totalBalance = joinMoney + winMoney;
+      
+      if (totalBalance < totalAmount) {
+        return res.status(400).json({
+          msg: `Insufficient balance. Required: ${totalAmount}, Available: ${totalBalance} (Join: ${joinMoney}, Win: ${winMoney})`,
+        });
+      }
+      
+      // Deduct from join money first, then from win money if needed
+      let remainingAmount = totalAmount;
+      let newWallet = joinMoney;
+      let newWinAmount = winMoney;
+      
+      if (joinMoney >= remainingAmount) {
+        // Enough join money - deduct only from wallet
+        newWallet = joinMoney - remainingAmount;
+        remainingAmount = 0;
+      } else {
+        // Not enough join money - use all join money, then deduct from win money
+        remainingAmount = remainingAmount - joinMoney;
+        newWallet = 0;
+        newWinAmount = winMoney - remainingAmount;
+        remainingAmount = 0;
+      }
+      
+      // Update user balances
+      user.wallet = newWallet;
+      user.winAmount = newWinAmount;
+      await user.save();
+    }
+
+    // Update booking fields if provided
+    if (selectedPositions) {
+      existingBooking.selectedPositions = new Map(Object.entries(selectedPositions));
+    }
+    
+    if (playerNames) {
+      existingBooking.playerNames = new Map(Object.entries(playerNames));
+    }
+    
+    if (totalAmount !== undefined) {
+      existingBooking.totalAmount = totalAmount;
+    }
+    
+    if (playerIndex) {
+      existingBooking.playerIndex = playerIndex;
+    }
+
+    // Update slot remaining bookings
+    if (positionsCount > 0) {
+      slot.remainingBookings -= positionsCount;
+      await slot.save();
+    }
+
+    await existingBooking.save();
+
+    // Create transaction record for booking update if it's a paid match
+    if (!isFreeMachatch && totalAmount > 0) {
+      try {
+        const Transaction = require('../models/Transaction');
+        const transactionId = `BOOKING_UPDATE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        await Transaction.create({
+          userId: user._id,
+          type: 'BOOKING',
+          amount: totalAmount,
+          description: `Booking update - ${slot.matchTitle || slot.slotType} - ${positionsCount} position${positionsCount > 1 ? 's' : ''}`,
+          transactionId: transactionId,
+          status: 'SUCCESS',
+          paymentMethod: 'WALLET',
+          balanceAfter: user.wallet + user.winAmount,
+          metadata: {
+            slotId: slot._id.toString(),
+            gameId: slot._id.toString(),
+            referenceId: transactionId,
+            updateType: 'booking_update'
+          }
+        });
+      } catch (error) {
+        console.error('Error creating booking update transaction:', error);
+      }
+    }
+
+    // Emit wallet update via socket.io
+    try {
+      const { emitWalletUpdate } = require('../websocket');
+      emitWalletUpdate(user._id.toString(), user.wallet + user.winAmount);
+    } catch (e) {
+      console.error('Socket emit error:', e);
+    }
+
+    await existingBooking.populate(
+      "slot",
+      "slotType matchTime totalWinningPrice streamLink"
+    );
+
+    return res.status(200).json({
+      msg: "Booking updated successfully",
+      booking: {
+        ...existingBooking.toObject(),
+        selectedPositions: Object.fromEntries(existingBooking.selectedPositions),
+        playerNames: Object.fromEntries(existingBooking.playerNames),
+      },
+      remainingBalance: user.wallet + user.winAmount,
+    });
+
+  } catch (err) {
+    console.error("Booking update failed:", err);
+    res.status(500).json({ error: err.message });
   }
 };

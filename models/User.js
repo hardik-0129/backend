@@ -18,6 +18,8 @@ const userSchema = new mongoose.Schema({
   referralFirstPaidCredited: { type: Boolean, default: false },
   totalReferralEarnings: { type: Number, default: 0 },
   totalReferrals: { type: Number, default: 0 },
+  // Earned by playing paid matches. Each paid match grants 1 pass to join a free match.
+  freeMatchPass: { type: Number, default: 0 },
   twoFactorEnabled: { type: Boolean, default: false },
   twoFactorType: { type: String, enum: ['none', 'email', 'totp'], default: 'none' },
   totpEnabled: { type: Boolean, default: false },
